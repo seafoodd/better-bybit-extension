@@ -74,9 +74,15 @@ tr.bybit-p2p-highlighted-order > td {
 }
 
 /* Seamless background for action button container in highlighted orders */
-.bybit-p2p-highlighted-order .fiat-p2p__action-button-inner {
-  background-color: var(--bds-gray-bg-area, #ffffff) !important;
-  background-image: linear-gradient(var(--bybit-hl-bg), var(--bybit-hl-bg)) !important;
+.bybit-p2p-highlighted-order .fiat-p2p__action-button-inner,
+.bybit-p2p-highlighted-order .fiat-p2p__action-button-wrapper {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* When expanded and Hide button is present, hide the underlying Buy button to prevent overlapping */
+.bybit-p2p-highlighted-order td.trade-list-action-button:has(button:last-child:not(:first-child)) button:first-child {
+  display: none !important;
 }
 
 /* 2. Text Keyword Highlight (Green background + White text) */

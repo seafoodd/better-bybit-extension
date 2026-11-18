@@ -817,6 +817,41 @@ export default defineContentScript({
       `;
     }
 
+    function syncActionButtonVisibility(row: HTMLElement) {
+      const actionTd = row.querySelector<HTMLElement>('td.trade-list-action-button');
+      if (!actionTd) return;
+
+      const buttons = Array.from(actionTd.querySelectorAll<HTMLButtonElement>('button'));
+      if (buttons.length <= 1) return;
+
+      const hideBtn = buttons.find(b => {
+        const t = (b.innerText || b.textContent || '').trim().toLowerCase();
+        return t === 'hide' || t === 'скрыть';
+      });
+
+      if (hideBtn) {
+        buttons.forEach(b => {
+          if (b !== hideBtn) {
+            b.style.setProperty('display', 'none', 'important');
+          } else {
+            b.style.removeProperty('display');
+          }
+        });
+      } else {
+        buttons.forEach(b => {
+          b.style.removeProperty('display');
+        });
+      }
+    }
+
+    function resetActionButtonVisibility(row: HTMLElement) {
+      const actionTd = row.querySelector<HTMLElement>('td.trade-list-action-button');
+      if (!actionTd) return;
+      actionTd.querySelectorAll<HTMLButtonElement>('button').forEach(b => {
+        b.style.removeProperty('display');
+      });
+    }
+
     function highlightTableOrders(keywords: string[]) {
       // 1. Regular order rows in table
       const rows = Array.from(document.querySelectorAll<HTMLElement>(
@@ -875,9 +910,11 @@ export default defineContentScript({
         if (matchedKeywords.length > 0) {
           element.classList.add('bybit-p2p-highlighted-order');
           renderTableRowBadge(element, priceEl, matchedKeywords, remark);
+          syncActionButtonVisibility(element);
         } else {
           element.classList.remove('bybit-p2p-highlighted-order');
           element.querySelectorAll('.bybit-p2p-match-container').forEach(el => el.remove());
+          resetActionButtonVisibility(element);
         }
       });
     }
@@ -936,6 +973,14 @@ export default defineContentScript({
           card.classList.remove('bybit-p2p-highlighted-order');
           removeBadges(card);
         }
+
+        // Sync action button states on row or accordion
+        if (card.previousElementSibling && card.previousElementSibling.classList.contains('bybit-p2p-highlighted-order')) {
+          syncActionButtonVisibility(card.previousElementSibling as HTMLElement);
+        }
+        if (card.classList.contains('bybit-p2p-highlighted-order')) {
+          syncActionButtonVisibility(card);
+        }
       });
     }
 
@@ -987,6 +1032,9 @@ export default defineContentScript({
       document.querySelectorAll('.bybit-native-all-hidden').forEach(el => {
         el.classList.remove('bybit-native-all-hidden');
         (el as HTMLElement).style.display = '';
+      });
+      document.querySelectorAll<HTMLElement>('td.trade-list-action-button button').forEach(b => {
+        b.style.removeProperty('display');
       });
     }
 
