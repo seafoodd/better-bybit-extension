@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bybit P2P Highlighter</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-group">
+        <span class="logo-icon">⚡</span>
+        <div class="logo-text">
+          <h1>Bybit P2P Highlighter</h1>
+          <span class="version-tag">v1.0</span>
+        </div>
+      </div>
+      <label class="switch" title="Включить / Выключить подсветку">
+        <input type="checkbox" id="master-toggle" checked>
+        <span class="slider round"></span>
+      </label>
+    </header>
+
+    <!-- Live Status Banner -->
+    <div class="status-banner" id="status-banner">
+      <div class="status-dot"></div>
+      <span id="status-text">Загрузка данных...</span>
+    </div>
+
+    <!-- Keyword Management -->
+    <section class="section">
+      <label class="section-label">Ключевые слова для подсветки</label>
+      
+      <form class="keyword-form" id="keyword-form">
+        <input 
+          type="text" 
+          id="keyword-input" 
+          placeholder="Например: СБП, телефона..." 
+          autocomplete="off"
+        />
+        <button type="submit" id="add-btn">+ Добавить</button>
+      </form>
+
+      <div class="tags-container" id="tags-container">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Quick Add Suggestions -->
+      <div class="quick-tags">
+        <span class="quick-label">Быстрые:</span>
+        <button type="button" class="quick-chip" data-kw="СБП">+ СБП</button>
+        <button type="button" class="quick-chip" data-kw="телефона">+ телефона</button>
+        <button type="button" class="quick-chip" data-kw="Тинькофф">+ Тинькофф</button>
+        <button type="button" class="quick-chip" data-kw="Сбер">+ Сбер</button>
+        <button type="button" class="quick-chip" data-kw="Т-Банк">+ Т-Банк</button>
+        <button type="button" class="quick-chip" data-kw="Озон">+ Озон</button>
+      </div>
+    </section>
+
+    <!-- Color Themes -->
+    <section class="section">
+      <label class="section-label">Цвет подсветки</label>
+      <div class="color-options" id="color-options">
+        <button type="button" class="color-btn active" data-color="emerald" title="Изумрудный">
+          <span class="color-preview emerald"></span>
+          <span>Изумруд</span>
+        </button>
+        <button type="button" class="color-btn" data-color="amber" title="Янтарный / Золотой">
+          <span class="color-preview amber"></span>
+          <span>Золото</span>
+        </button>
+        <button type="button" class="color-btn" data-color="cyan" title="Электрик Циан">
+          <span class="color-preview cyan"></span>
+          <span>Циан</span>
+        </button>
+        <button type="button" class="color-btn" data-color="violet" title="Фиолетовый">
+          <span class="color-preview violet"></span>
+          <span>Фиолет</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Display Options -->
+    <section class="section">
+      <label class="section-label">Параметры отображения</label>
+      
+      <div class="checkbox-row">
+        <label class="checkbox-label">
+          <input type="checkbox" id="show-remark-toggle" checked>
+          <span>Показывать примечание (remark) в строке</span>
+        </label>
+      </div>
+
+      <div class="checkbox-row">
+        <label class="checkbox-label">
+          <input type="checkbox" id="dim-toggle">
+          <span>Затемнять остальные заказы</span>
+        </label>
+      </div>
+
+      <div class="checkbox-row">
+        <label class="checkbox-label">
+          <input type="checkbox" id="hide-toggle">
+          <span>Скрывать остальные заказы</span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span>Работает на Bybit P2P (RUB / USDT / др.)</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
