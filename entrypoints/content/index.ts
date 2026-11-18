@@ -668,32 +668,48 @@ export default defineContentScript({
       });
     }
 
-    // 7. Find Open Expanded Order Containers
+    // 7. Find Open Expanded Order Containers (Strictly isolated to order cards, never #root)
     function findOpenOrderContainers(): HTMLElement[] {
-      const candidates = Array.from(document.querySelectorAll<HTMLElement>('tr, div')).filter(el => {
-        const text = el.textContent || '';
-        return (text.includes('Advertiser Terms') || text.includes('Условия рекламодателя')) && 
-               (text.includes('I will pay') || text.includes('Price') || text.includes('Buy'));
+      // Find leaf headers containing "Advertiser Terms" or "Условия рекламодателя"
+      const allHeaders = Array.from(document.querySelectorAll<HTMLElement>('*')).filter(el => {
+        if (el.id === 'root' || el.tagName === 'BODY' || el.tagName === 'HTML' || el.classList.contains('otc__root')) {
+          return false;
+        }
+        if (el.children.length > 2) return false;
+        const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+        return t === 'advertiser terms' || t === 'условия рекламодателя';
       });
 
-      if (candidates.length === 0) return [];
+      if (allHeaders.length === 0) return [];
 
       const result: HTMLElement[] = [];
-      candidates.forEach(c => {
-        let outer: HTMLElement | null = c;
-        while (outer && outer.parentElement && outer.tagName !== 'TR' && outer.parentElement !== document.body) {
-          if (outer.parentElement.tagName === 'TR') {
-            outer = outer.parentElement;
+
+      allHeaders.forEach(header => {
+        // 1. If header is inside a table row (TR), use that TR
+        const tr = header.closest('tr');
+        if (tr && tr.id !== 'root' && !tr.classList.contains('otc__root') && tr !== document.body as any) {
+          if (!result.includes(tr)) {
+            result.push(tr);
+          }
+          return;
+        }
+
+        // 2. Otherwise find the nearest card/accordion container
+        let cur: HTMLElement | null = header.parentElement;
+        while (cur && cur.id !== 'root' && cur !== document.body && cur.parentElement !== document.body) {
+          if (cur.classList.contains('otc__root')) break;
+          const text = cur.textContent || '';
+          if (text.includes('I will pay') || text.includes('Я заплачу') || text.includes('Price') || text.includes('Цена')) {
+            if (!result.includes(cur)) {
+              result.push(cur);
+            }
             break;
           }
-          outer = outer.parentElement;
-        }
-        if (outer && !result.includes(outer)) {
-          result.push(outer);
+          cur = cur.parentElement;
         }
       });
 
-      return result.length > 0 ? result : [candidates[0]];
+      return result;
     }
 
     function findPriceHeaderElement(container: HTMLElement): HTMLElement | null {
@@ -817,12 +833,25 @@ export default defineContentScript({
 
       const keywords = getActiveKeywords();
 
+      // Clean up any rogue classes from root
+      const rootEl = document.getElementById('root');
+      if (rootEl) {
+        rootEl.classList.remove('bybit-p2p-highlighted-card', 'bybit-p2p-highlighted-order');
+      }
+      document.querySelectorAll('.otc__root').forEach(el => {
+        el.classList.remove('bybit-p2p-highlighted-card', 'bybit-p2p-highlighted-order');
+      });
+
       // 1. Highlight all table orders and carousel cards immediately from intercepted data
       highlightTableOrders(keywords);
 
       // 2. Process open/expanded order containers
       const openOrders = findOpenOrderContainers();
       openOrders.forEach(card => {
+        if (card.id === 'root' || card.classList.contains('otc__root') || card === document.body as any) {
+          return;
+        }
+
         // Payment Auto-Selection (Strictly USDT/RUB Buy page, only if seller offers target methods)
         autoSelectPaymentMethod(card);
 

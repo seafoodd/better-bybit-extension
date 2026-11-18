@@ -29,6 +29,21 @@
 }
 
 /* 1. Solid Left Stripe for Highlighted Order & Expanded Card */
+#root,
+.otc__root,
+body,
+html {
+  border-left: none !important;
+}
+
+#root.bybit-p2p-highlighted-order,
+#root.bybit-p2p-highlighted-card,
+.otc__root.bybit-p2p-highlighted-order,
+.otc__root.bybit-p2p-highlighted-card {
+  border-left: none !important;
+  background-color: transparent !important;
+}
+
 .bybit-p2p-highlighted-order {
   border-left: 4px solid var(--bybit-hl-border) !important;
   border-top-left-radius: 0 !important;
