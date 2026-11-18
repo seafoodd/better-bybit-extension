@@ -211,6 +211,7 @@ body.bybit-suppress-dropdown [data-guide="payment-method"] > div:nth-child(2) {
   user-select: none !important;
   transition: all 0.15s ease !important;
   vertical-align: baseline !important;
+  white-space: nowrap !important;
 }
 
 .bybit-number-highlight:hover {

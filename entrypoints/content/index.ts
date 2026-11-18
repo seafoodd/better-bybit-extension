@@ -408,17 +408,13 @@ export default defineContentScript({
 
     // 5. Price / Amount Input & "ALL" Button Handling
     function cleanNumberString(val: string): string {
-      let clean = val.replace(/[\s\u00a0]/g, '');
-      if (clean.includes(',') && clean.includes('.')) {
-        clean = clean.replace(/,/g, '');
-      } else if (clean.includes(',')) {
-        if (/,\d{2}$/.test(clean)) {
-          clean = clean.replace(',', '.');
-        } else {
-          clean = clean.replace(/,/g, '');
-        }
-      }
-      return clean;
+      if (!val) return '';
+      let s = val.trim();
+      // Strip trailing .00 or ,00 (cents/kopecks) if present
+      s = s.replace(/[.,]00(?!\d)/, '');
+      // Strip all spaces, non-breaking spaces, dots, and commas
+      s = s.replace(/[\s\u00a0\u202f\u2000-\u200b.,]/g, '');
+      return s;
     }
 
     function unwrapOldWrappers(container: HTMLElement) {
@@ -473,6 +469,8 @@ export default defineContentScript({
       const payInput = findPayAmountInput(container);
       if (!payInput) return;
 
+      const sanitizedValue = cleanNumberString(value);
+
       payInput.focus();
 
       const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
@@ -481,9 +479,9 @@ export default defineContentScript({
       )?.set;
 
       if (nativeInputValueSetter) {
-        nativeInputValueSetter.call(payInput, value);
+        nativeInputValueSetter.call(payInput, sanitizedValue);
       } else {
-        payInput.value = value;
+        payInput.value = sanitizedValue;
       }
 
       payInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -627,8 +625,9 @@ export default defineContentScript({
 
       const escapedKws = keywords.map(escapeRegExp).filter(Boolean);
       const kwPattern = escapedKws.length > 0 ? escapedKws.join('|') : null;
-      // Match numbers with at least 3 digits (supports 24143, 16,200.00, 3 000, etc.)
-      const numPattern = '(?<!\\d)(?:\\d{1,3}(?:[ ,.\\u00a0]\\d{3})+(?:[.,]\\d+)?|\\d{3,}(?:[.,]\\d+)?)(?!\\d)';
+      // Match numbers with at least 3 digits (supports 19000, 19 000, 19.000, 19,000, 18 715, etc.)
+      const sep = '(?:[\\s\\u00a0\\u202f\\u2000-\\u200b]+|[.,])';
+      const numPattern = `(?<!\\d)(?:\\d{1,3}(?:${sep}\\d{3})+(?:[.,]00)?|\\d{3,}(?:[.,]00)?)(?!\\d)`;
 
       let fullRegex: RegExp;
       if (kwPattern) {
