@@ -98,3 +98,13 @@
 .bybit-p2p-match-tag .bybit-tag-icon {
   font-size: 11px !important;
 }
+
+/* 4. Instant Selection Dropdown Suppression */
+body.bybit-suppress-dropdown div[class*="dropdown"],
+body.bybit-suppress-dropdown div[class*="popover"],
+body.bybit-suppress-dropdown div[class*="select-list"],
+body.bybit-suppress-dropdown div[role="listbox"] {
+  opacity: 0 !important;
+  transition: none !important;
+  animation: none !important;
+}
