@@ -46,6 +46,36 @@ tr.bybit-p2p-highlighted-order > td {
   background-color: var(--bybit-hl-bg) !important;
 }
 
+/* Seamless background for action cell & wrapper around Hide button in highlighted orders */
+tr.bybit-p2p-highlighted-order td.trade-list-action-button,
+tr.bybit-p2p-highlighted-order .trade-list-action-button,
+tr.bybit-p2p-highlighted-order .fiat-p2p__action-button-wrapper,
+tr.bybit-p2p-highlighted-order .fiat-p2p__action-button-inner,
+tr.bybit-p2p-highlighted-order .bybit-p2p-action-cell-highlighted,
+tr.bybit-p2p-highlighted-order td:last-child,
+tr.bybit-p2p-highlighted-order td:last-child div,
+tr.bybit-p2p-highlighted-order [class*="action-button"],
+tr.bybit-p2p-highlighted-order [class*="action-button"] div {
+  background: var(--bybit-hl-bg) !important;
+  background-color: var(--bybit-hl-bg) !important;
+}
+
+/* Hide button styling inside highlighted row */
+tr.bybit-p2p-highlighted-order .bybit-p2p-hide-btn,
+.bybit-p2p-hide-btn {
+  background: rgba(16, 185, 129, 0.12) !important;
+  background-color: rgba(16, 185, 129, 0.12) !important;
+  border: 1px solid rgba(16, 185, 129, 0.3) !important;
+  color: var(--bybit-hl-border) !important;
+  transition: all 0.15s ease !important;
+}
+
+.bybit-p2p-hide-btn:hover {
+  background: rgba(16, 185, 129, 0.22) !important;
+  background-color: rgba(16, 185, 129, 0.22) !important;
+  border-color: var(--bybit-hl-border) !important;
+}
+
 .bybit-p2p-highlighted-card {
   border-left: 4px solid var(--bybit-hl-border) !important;
   border-top-left-radius: 0 !important;

@@ -805,6 +805,20 @@ export default defineContentScript({
       });
     }
 
+    function tagHideButtons(container: HTMLElement) {
+      const allButtons = container.querySelectorAll<HTMLElement>('button, div[role="button"]');
+      allButtons.forEach(btn => {
+        const t = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+        if (t === 'hide' || t === 'скрыть') {
+          btn.classList.add('bybit-p2p-hide-btn');
+          const cell = btn.closest('td, .trade-list-action-button, [class*="action"]');
+          if (cell) {
+            cell.classList.add('bybit-p2p-action-cell-highlighted');
+          }
+        }
+      });
+    }
+
     // 9. Core Highlight & Processing Loop
     function highlightOrders() {
       const oldWidget = document.getElementById('bybit-p2p-floating-widget');
@@ -817,12 +831,19 @@ export default defineContentScript({
 
       const keywords = getActiveKeywords();
 
+      // Tag all Hide buttons so their backgrounds blend seamlessly
+      tagHideButtons(document.body);
+
       // 1. Highlight all table orders and carousel cards immediately from intercepted data
       highlightTableOrders(keywords);
 
       // 2. Process open/expanded order containers
       const openOrders = findOpenOrderContainers();
       openOrders.forEach(card => {
+        if (card.previousElementSibling) {
+          tagHideButtons(card.previousElementSibling as HTMLElement);
+        }
+
         // Payment Auto-Selection (Strictly USDT/RUB Buy page, only if seller offers target methods)
         autoSelectPaymentMethod(card);
 
