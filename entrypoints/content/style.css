@@ -4,6 +4,7 @@
   --bybit-hl-bg: rgba(16, 185, 129, 0.08);
   --bybit-hl-border: #10b981;
   --bybit-hl-badge-gradient: linear-gradient(135deg, #059669, #10b981);
+  --bybit-hl-solid-bg: #ecf9f5;
 }
 
 /* Color theme variants */
@@ -12,6 +13,7 @@
   --bybit-hl-bg: rgba(245, 158, 11, 0.08);
   --bybit-hl-border: #f59e0b;
   --bybit-hl-badge-gradient: linear-gradient(135deg, #d97706, #f59e0b);
+  --bybit-hl-solid-bg: #fef9f0;
 }
 
 [data-bybit-theme="cyan"],
@@ -19,6 +21,7 @@
   --bybit-hl-bg: rgba(6, 182, 212, 0.08);
   --bybit-hl-border: #06b6d4;
   --bybit-hl-badge-gradient: linear-gradient(135deg, #0891b2, #06b6d4);
+  --bybit-hl-solid-bg: #ebfbfd;
 }
 
 [data-bybit-theme="violet"],
@@ -26,6 +29,7 @@
   --bybit-hl-bg: rgba(168, 85, 247, 0.08);
   --bybit-hl-border: #a855f7;
   --bybit-hl-badge-gradient: linear-gradient(135deg, #9333ea, #a855f7);
+  --bybit-hl-solid-bg: #f9f4fe;
 }
 
 /* 1. Solid Left Stripe for Highlighted Order & Expanded Card */
@@ -75,14 +79,10 @@ tr.bybit-p2p-highlighted-order > td {
 
 /* Seamless background for action button container in highlighted orders */
 .bybit-p2p-highlighted-order .fiat-p2p__action-button-inner,
-.bybit-p2p-highlighted-order .fiat-p2p__action-button-wrapper {
-  background: transparent !important;
-  background-color: transparent !important;
-}
-
-/* When expanded and Hide button is present, hide the underlying Buy button to prevent overlapping */
-.bybit-p2p-highlighted-order td.trade-list-action-button:has(button:last-child:not(:first-child)) button:first-child {
-  display: none !important;
+.bybit-p2p-highlighted-order .fiat-p2p__action-button-wrapper,
+.bybit-p2p-highlighted-order td.trade-list-action-button {
+  background: var(--bybit-hl-solid-bg, #ecf9f5) !important;
+  background-color: var(--bybit-hl-solid-bg, #ecf9f5) !important;
 }
 
 /* 2. Text Keyword Highlight (Green background + White text) */
