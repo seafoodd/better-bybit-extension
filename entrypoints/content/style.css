@@ -83,32 +83,123 @@ tr.bybit-p2p-highlighted-order > td {
   padding-right: 8px !important;
 }
 
-/* For standalone order elements like cards, paint the background once */
+/* For standalone order elements like cards, paint the background once and expand 8px */
 div.bybit-p2p-highlighted-order {
   background-color: var(--bybit-hl-bg) !important;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+  margin-left: -8px !important;
+  margin-right: -8px !important;
+  width: calc(100% + 16px) !important;
+  box-sizing: border-box !important;
 }
 
 tr.bybit-p2p-highlighted-order > td:first-child {
+  position: relative !important;
+  border-left: none !important;
+  padding-left: 8px !important;
+}
+
+tr.bybit-p2p-highlighted-order > td:first-child::before {
+  content: '' !important;
+  display: block !important;
+  position: absolute !important;
+  left: -8px !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  height: 100% !important;
+  width: 8px !important;
+  background-color: var(--bybit-hl-bg) !important;
   border-left: 4px solid var(--bybit-hl-border) !important;
-  padding-left: 12px !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  z-index: 1 !important;
 }
 
 tr.bybit-p2p-highlighted-order > td:last-child {
-  padding-right: 12px !important;
+  position: relative !important;
+  padding-right: 8px !important;
+}
+
+tr.bybit-p2p-highlighted-order > td:last-child::after {
+  content: '' !important;
+  display: block !important;
+  position: absolute !important;
+  right: -8px !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  height: 100% !important;
+  width: 8px !important;
+  background: var(--bybit-hl-solid-bg, #ecf9f5) !important;
+  background-color: var(--bybit-hl-solid-bg, #ecf9f5) !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  z-index: 1 !important;
 }
 
 .bybit-p2p-highlighted-card {
-  border-left: 4px solid var(--bybit-hl-border) !important;
-  border-top-left-radius: 0 !important;
-  border-bottom-left-radius: 0 !important;
   position: relative !important;
   padding-left: 8px !important;
   padding-right: 8px !important;
 }
 
+div.bybit-p2p-highlighted-card {
+  border-left: 4px solid var(--bybit-hl-border) !important;
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+  margin-left: -8px !important;
+  margin-right: -8px !important;
+  width: calc(100% + 16px) !important;
+  box-sizing: border-box !important;
+}
+
+tr.bybit-p2p-highlighted-card > td:first-child {
+  position: relative !important;
+  border-left: none !important;
+  padding-left: 8px !important;
+}
+
+tr.bybit-p2p-highlighted-card > td:first-child::before {
+  content: '' !important;
+  display: block !important;
+  position: absolute !important;
+  left: -8px !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  height: 100% !important;
+  width: 8px !important;
+  border-left: 4px solid var(--bybit-hl-border) !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  z-index: 1 !important;
+}
+
+tr.bybit-p2p-highlighted-card > td:last-child {
+  position: relative !important;
+  padding-right: 8px !important;
+}
+
+tr.bybit-p2p-highlighted-card > td:last-child::after {
+  content: '' !important;
+  display: block !important;
+  position: absolute !important;
+  right: -8px !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  height: 100% !important;
+  width: 8px !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  z-index: 1 !important;
+}
+
 .new-user-ads-carousel-card.bybit-p2p-highlighted-order {
   padding-left: 8px !important;
   padding-right: 8px !important;
+  margin-left: -8px !important;
+  margin-right: -8px !important;
+  width: calc(100% + 16px) !important;
+  box-sizing: border-box !important;
 }
 
 .bybit-p2p-highlighted-order > div {
