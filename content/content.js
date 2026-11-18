@@ -89,8 +89,7 @@
     document.documentElement.setAttribute('data-bybit-theme', color || 'emerald');
   }
 
-  // 2. Inject Page-Context Interceptor
-  // Runs in the page's main world to avoid any Firefox Xray Vision cross-compartment permission errors
+  // 2. Inject Page-Context Interceptor Fallback
   function injectPageInterceptor() {
     try {
       const script = document.createElement('script');
@@ -98,9 +97,7 @@
       script.async = false;
       script.onload = () => script.remove();
       (document.head || document.documentElement).appendChild(script);
-    } catch (e) {
-      console.warn('[Bybit Highlighter] Script injection failed:', e);
-    }
+    } catch (e) {}
 
     // Listen for data dispatched by injected.js
     window.addEventListener('message', (event) => {
@@ -130,6 +127,8 @@
 
       if (!items || items.length === 0) return;
 
+      console.log(`[Bybit Highlighter] Cached ${items.length} P2P items from API`);
+
       const newIds = [];
       items.forEach(item => {
         if (!item) return;
@@ -153,7 +152,7 @@
         state.lastItemIds = newIds;
       }
 
-      scheduleHighlight(30);
+      scheduleHighlight(10);
     } catch (e) {
       // Not JSON or other structure, ignore
     }
@@ -183,43 +182,56 @@
 
   // 5. DOM Row Discovery
   function findAllOrderRows() {
-    // Strategy A: Standard table rows
-    const trs = Array.from(document.querySelectorAll('tbody tr, table tr')).filter(tr => 
-      !tr.querySelector('th') && (tr.innerText || '').trim().length > 0
-    );
+    // Strategy A: Find all trade action buttons on the P2P page
+    // Every order row (closed or open) contains one of these buttons:
+    // "Buy USDT", "Sell USDT", "Купить USDT", "Hide", "Скрыть"
+    const allButtons = Array.from(document.querySelectorAll('button')).filter(btn => {
+      const txt = (btn.textContent || '').trim().toLowerCase();
+      return txt.startsWith('buy') || txt.startsWith('sell') || 
+             txt.startsWith('купить') || txt.startsWith('продать') ||
+             txt === 'hide' || txt === 'скрыть';
+    });
+
+    if (allButtons.length > 0) {
+      const rows = [];
+      allButtons.forEach(btn => {
+        let cur = btn.parentElement;
+        while (cur && cur !== document.body) {
+          const parent = cur.parentElement;
+          if (parent) {
+            const siblingButtons = Array.from(parent.children).filter(child => {
+              return child.querySelector && child.querySelector('button');
+            });
+            if (siblingButtons.length >= 2) {
+              const text = cur.textContent || '';
+              // Verify that this row contains order info (price/fiat or merchant)
+              if (text.includes('RUB') || text.includes('USDT') || text.includes('Order') || text.includes('Заказ')) {
+                rows.push(cur);
+                break;
+              }
+            }
+          }
+          cur = cur.parentElement;
+        }
+      });
+
+      if (rows.length > 0) {
+        return Array.from(new Set(rows));
+      }
+    }
+
+    // Strategy B: Standard table rows (if Bybit uses <table>)
+    const trs = Array.from(document.querySelectorAll('tbody tr, table tr')).filter(tr => {
+      const text = tr.innerText || '';
+      return !tr.querySelector('th') && (text.includes('RUB') || text.includes('USDT') || text.includes('Buy') || text.includes('Купить'));
+    });
     if (trs.length > 0) return trs;
 
-    // Strategy B: CSS class rows
+    // Strategy C: CSS class rows
     const classRows = Array.from(document.querySelectorAll(
       'div[class*="trade-table__row"], div[class*="table-row"], div[class*="trade-row"], div[class*="advertiser-item"], div[class*="otc-item"]'
     ));
     if (classRows.length > 0) return classRows;
-
-    // Strategy C: Find trade action buttons ("Buy", "Sell", "Купить", "Продать")
-    const actionButtons = Array.from(document.querySelectorAll('button')).filter(btn => {
-      const txt = (btn.textContent || '').trim().toLowerCase();
-      return txt.startsWith('buy') || txt.startsWith('sell') || 
-             txt.startsWith('купить') || txt.startsWith('продать');
-    });
-
-    if (actionButtons.length > 0) {
-      const rows = [];
-      actionButtons.forEach(btn => {
-        let el = btn.parentElement;
-        while (el && el !== document.body) {
-          if (el.parentElement && el.parentElement.children.length >= 2) {
-            const siblings = Array.from(el.parentElement.children);
-            const siblingButtons = siblings.filter(s => s.querySelector && s.querySelector('button'));
-            if (siblingButtons.length >= 2) {
-              rows.push(el);
-              break;
-            }
-          }
-          el = el.parentElement;
-        }
-      });
-      if (rows.length > 0) return rows;
-    }
 
     return [];
   }
@@ -227,7 +239,7 @@
   // Associate a DOM row with an intercepted API item
   function findItemForOrderRow(row) {
     const rowHtml = row.innerHTML || '';
-    const rowText = row.textContent || '';
+    const rowText = (row.textContent || '').trim();
     const rowTextLower = rowText.toLowerCase();
 
     // 1. Search by Item ID in attributes or HTML
@@ -246,9 +258,12 @@
 
     // 3. Search by Nickname + Price
     for (const [key, item] of state.itemsByKey.entries()) {
-      if (item.nickName && rowText.includes(item.nickName)) {
-        if (item.price && rowText.includes(item.price)) {
-          return item;
+      if (item.nickName) {
+        const nickLower = item.nickName.trim().toLowerCase();
+        if (rowTextLower.includes(nickLower)) {
+          if (item.price && rowText.includes(item.price)) {
+            return item;
+          }
         }
       }
     }
@@ -299,7 +314,7 @@
         row.classList.add('bybit-p2p-highlighted-order');
         row.classList.remove('bybit-p2p-dimmed-order', 'bybit-p2p-hidden-order');
 
-        // Render / Update Match Badge
+        // Render / Update Match Badge right on the row
         renderBadge(row, allMatches);
 
         // Render / Update Remark Preview if available and enabled
@@ -335,14 +350,25 @@
       container = document.createElement('div');
       container.className = 'bybit-p2p-match-container';
 
-      // Insert near payment methods cell or inside first column
-      const targetCell = row.children[3] || row.children[0] || row;
+      // Find the payment methods cell (typically contains "Mobile Top-up" or "Bank Transfer")
+      // or append inside column 4 or first column
+      let targetCell = null;
+      for (const child of row.children) {
+        const text = child.textContent || '';
+        if (text.includes('Top-up') || text.includes('Transfer') || text.includes('Bank') || text.includes('Cash')) {
+          targetCell = child;
+          break;
+        }
+      }
+      if (!targetCell) {
+        targetCell = row.children[3] || row.children[0] || row;
+      }
       targetCell.appendChild(container);
     }
 
     const labelText = matchedKeywords.map(k => k.toUpperCase()).join(' • ');
     container.innerHTML = `
-      <span class="bybit-p2p-match-tag" title="Найдено в условиях сделки">
+      <span class="bybit-p2p-match-tag" title="Найдено в условиях сделки (СБП)">
         <span class="bybit-tag-icon">⚡</span>
         <span>${escapeHtml(labelText)}</span>
       </span>
@@ -360,13 +386,8 @@
       box = document.createElement('div');
       box.className = 'bybit-p2p-remark-box';
 
-      // Attach to row
-      if (row.tagName === 'TR') {
-        const targetCell = row.children[3] || row.children[row.children.length - 1] || row.children[0];
-        targetCell.appendChild(box);
-      } else {
-        row.appendChild(box);
-      }
+      // Always append to row container; CSS flex-basis: 100% causes it to span the bottom
+      row.appendChild(box);
     }
 
     // Check if user already expanded it
@@ -426,7 +447,6 @@
     let escaped = escapeHtml(text);
     if (!keywords || keywords.length === 0) return escaped;
 
-    // Create a safe regex matching any keyword case-insensitively
     const escapedKws = keywords.map(escapeRegExp).filter(Boolean);
     if (escapedKws.length === 0) return escaped;
 
@@ -526,7 +546,7 @@
       if (state.settings.enabled && window.location.href.includes('otc')) {
         highlightOrders();
       }
-    }, 2500);
+    }, 2000);
 
     // Watch URL / History changes
     window.addEventListener('popstate', () => scheduleHighlight(200));

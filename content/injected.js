@@ -9,6 +9,8 @@
   if (window.__BYBIT_P2P_INTERCEPTOR_ACTIVE__) return;
   window.__BYBIT_P2P_INTERCEPTOR_ACTIVE__ = true;
 
+  console.log('[Bybit P2P Highlighter] Interceptor active in page context');
+
   const TARGET_PATTERNS = [
     '/fiat/otc/item/online',
     '/fiat/otc/item/',
@@ -22,13 +24,35 @@
     return TARGET_PATTERNS.some(pattern => url.includes(pattern));
   }
 
-  function broadcastData(text, url) {
-    if (!text || typeof text !== 'string') return;
+  function getCleanUrl(resource) {
+    if (!resource) return '';
+    if (typeof resource === 'string') return resource;
+    if (typeof resource.url === 'string') return resource.url;
+    if (typeof resource.href === 'string') return resource.href;
     try {
-      // Must contain something that looks like OTC item list
-      if (!text.includes('result') || !text.includes('items')) {
+      return resource.toString();
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function broadcastData(data, url) {
+    try {
+      let text = '';
+      if (typeof data === 'string') {
+        text = data;
+      } else if (typeof data === 'object' && data !== null) {
+        text = JSON.stringify(data);
+      }
+      if (!text || text.length < 10) return;
+
+      // Ensure it contains items or result
+      if (!text.includes('result') && !text.includes('items') && !text.includes('ret_code')) {
         return;
       }
+
+      console.log('[Bybit P2P Highlighter] Intercepted P2P items payload, length:', text.length);
+
       window.postMessage({
         type: '__BYBIT_P2P_DATA__',
         text: text,
@@ -45,15 +69,16 @@
     window.fetch = function (...args) {
       const promise = originalFetch.apply(this, args);
       try {
-        const resource = args[0];
-        const url = typeof resource === 'string' ? resource : (resource && resource.url ? resource.url : '');
+        const url = getCleanUrl(args[0]);
         if (isTargetUrl(url)) {
           promise.then(response => {
             try {
               const clone = response.clone();
               clone.text().then(text => {
                 broadcastData(text, url);
-              }).catch(() => {});
+              }).catch(() => {
+                clone.json().then(json => broadcastData(json, url)).catch(() => {});
+              });
             } catch (e) {}
           }).catch(() => {});
         }
@@ -69,7 +94,7 @@
     const originalSend = xhrProto.send;
 
     xhrProto.open = function (method, url) {
-      this.__bybit_url = typeof url === 'string' ? url : (url && url.toString ? url.toString() : '');
+      this.__bybit_url = getCleanUrl(url);
       return originalOpen.apply(this, arguments);
     };
 
@@ -79,13 +104,25 @@
         try {
           const url = xhr.__bybit_url || '';
           if (isTargetUrl(url)) {
-            broadcastData(xhr.responseText, url);
+            let data = null;
+            // CRITICAL FIX: If responseType is 'json', accessing xhr.responseText
+            // throws InvalidStateError! We must check responseType and xhr.response!
+            if (xhr.responseType === 'json' || (xhr.response && typeof xhr.response === 'object')) {
+              data = xhr.response;
+            } else {
+              try {
+                data = xhr.responseText;
+              } catch (err) {
+                data = xhr.response;
+              }
+            }
+            broadcastData(data, url);
           }
-        } catch (e) {}
+        } catch (e) {
+          console.warn('[Bybit P2P Highlighter] XHR handler error:', e);
+        }
       });
       return originalSend.apply(this, arguments);
     };
   }
-
-  console.log('[Bybit P2P Highlighter] Interceptor hooked in page context');
 })();

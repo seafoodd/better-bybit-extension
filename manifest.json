@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Bybit P2P Order Highlighter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Highlights Bybit P2P orders matching keywords (like СБП, телефона) in seller remarks and payment terms.",
   "browser_specific_settings": {
     "gecko": {
@@ -31,6 +31,15 @@
     "128": "icons/icon-128.png"
   },
   "content_scripts": [
+    {
+      "matches": [
+        "*://*.bybit.com/*",
+        "*://bybit.com/*"
+      ],
+      "js": ["content/injected.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "*://*.bybit.com/*",
