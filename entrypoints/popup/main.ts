@@ -1,38 +1,22 @@
 import { browser } from 'wxt/browser';
+import type { Settings, HighlightColor } from '../../src/types/settings';
+import { storageService } from '../../src/services/storage';
+import { escapeHtml } from '../../src/utils/text';
 
-interface Settings {
-  enabled: boolean;
-  keywords: string[];
-  highlightColor: string;
-  [key: string]: any;
-}
-
-let currentSettings: Settings = {
-  enabled: true,
-  keywords: ['СБП', 'телефона'],
-  highlightColor: 'emerald'
-};
+let currentSettings: Settings = storageService.getSettings();
 
 // DOM Elements
-const masterToggle = document.getElementById('master-toggle') as HTMLInputElement;
-const statusBanner = document.getElementById('status-banner') as HTMLDivElement;
-const statusText = document.getElementById('status-text') as HTMLSpanElement;
-const keywordForm = document.getElementById('keyword-form') as HTMLFormElement;
-const keywordInput = document.getElementById('keyword-input') as HTMLInputElement;
-const tagsContainer = document.getElementById('tags-container') as HTMLDivElement;
+const masterToggle = document.getElementById('master-toggle') as HTMLInputElement | null;
+const statusBanner = document.getElementById('status-banner') as HTMLDivElement | null;
+const statusText = document.getElementById('status-text') as HTMLSpanElement | null;
+const keywordForm = document.getElementById('keyword-form') as HTMLFormElement | null;
+const keywordInput = document.getElementById('keyword-input') as HTMLInputElement | null;
+const tagsContainer = document.getElementById('tags-container') as HTMLDivElement | null;
 const quickChips = document.querySelectorAll<HTMLButtonElement>('.quick-chip');
 const colorButtons = document.querySelectorAll<HTMLButtonElement>('.color-btn');
 
 async function init() {
-  try {
-    const stored = await browser.storage.local.get(currentSettings);
-    if (stored) {
-      currentSettings = { ...currentSettings, ...(stored as Partial<Settings>) };
-    }
-  } catch (e) {
-    console.warn('Failed to load settings:', e);
-  }
-
+  currentSettings = await storageService.loadSettings();
   applySettingsToUI();
   updateStatusBanner();
   setupEventListeners();
@@ -100,25 +84,8 @@ function removeKeyword(index: number) {
 }
 
 async function saveSettings() {
-  try {
-    await browser.storage.local.set(currentSettings);
-    await notifyContentScript();
-    updateStatusBanner();
-  } catch (e) {
-    console.warn('Failed to save settings:', e);
-  }
-}
-
-async function notifyContentScript() {
-  try {
-    const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-    if (tabs && tabs[0] && tabs[0].id) {
-      browser.tabs.sendMessage(tabs[0].id, {
-        type: 'UPDATE_SETTINGS',
-        settings: currentSettings
-      }).catch(() => {});
-    }
-  } catch (e) {}
+  await storageService.saveSettings(currentSettings);
+  updateStatusBanner();
 }
 
 async function updateStatusBanner() {
@@ -178,21 +145,11 @@ function setupEventListeners() {
       colorButtons.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       if (btn.dataset.color) {
-        currentSettings.highlightColor = btn.dataset.color;
+        currentSettings.highlightColor = btn.dataset.color as HighlightColor;
         saveSettings();
       }
     });
   });
-}
-
-function escapeHtml(str: string): string {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
 }
 
 document.addEventListener('DOMContentLoaded', init);

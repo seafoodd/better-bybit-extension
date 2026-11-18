@@ -1,4 +1,11 @@
 import { defineContentScript } from 'wxt/sandbox';
+import { TARGET_URL_PATTERNS } from '../src/constants/config';
+import {
+  WINDOW_EVENT_DATA,
+  WINDOW_EVENT_REQUEST_CACHE,
+  POST_MESSAGE_TYPE_DATA,
+  WINDOW_EVENT_SELECT_PAYMENT
+} from '../src/types/messages';
 
 export default defineContentScript({
   matches: ['*://*.bybit.com/*', '*://bybit.com/*'],
@@ -13,18 +20,9 @@ export default defineContentScript({
     // ==========================================
     // Part 1: Network Interceptor
     // ==========================================
-    const TARGET_PATTERNS = [
-      '/fiat/otc/item/online',
-      '/fiat/otc/item/',
-      '/fiat/otc/',
-      '/otc/item/online',
-      '/otc/item/',
-      'online'
-    ];
-
     function isTargetUrl(url: any): boolean {
       if (!url || typeof url !== 'string') return false;
-      return TARGET_PATTERNS.some(pattern => url.includes(pattern));
+      return TARGET_URL_PATTERNS.some(pattern => url.includes(pattern));
     }
 
     function getCleanUrl(resource: any): string {
@@ -57,13 +55,13 @@ export default defineContentScript({
         (window as any).__BYBIT_P2P_LAST_DATA__ = text;
 
         // 2. Dispatch custom event for content script
-        window.dispatchEvent(new CustomEvent('__BYBIT_P2P_DATA_EVENT__', {
+        window.dispatchEvent(new CustomEvent(WINDOW_EVENT_DATA, {
           detail: { text, url }
         }));
 
         // 3. PostMessage across worlds
         window.postMessage({
-          type: '__BYBIT_P2P_DATA__',
+          type: POST_MESSAGE_TYPE_DATA,
           text: text,
           url: url
         }, '*');
@@ -72,11 +70,11 @@ export default defineContentScript({
       }
     }
 
-    window.addEventListener('__BYBIT_REQUEST_LAST_DATA__', () => {
+    window.addEventListener(WINDOW_EVENT_REQUEST_CACHE, () => {
       const last = (window as any).__BYBIT_P2P_LAST_DATA__;
       if (last) {
-        window.dispatchEvent(new CustomEvent('__BYBIT_P2P_DATA_EVENT__', { detail: { text: last, url: 'cache' } }));
-        window.postMessage({ type: '__BYBIT_P2P_DATA__', text: last, url: 'cache' }, '*');
+        window.dispatchEvent(new CustomEvent(WINDOW_EVENT_DATA, { detail: { text: last, url: 'cache' } }));
+        window.postMessage({ type: POST_MESSAGE_TYPE_DATA, text: last, url: 'cache' }, '*');
       }
     });
 
@@ -439,7 +437,7 @@ export default defineContentScript({
       }, 15);
     }
 
-    window.addEventListener('__BYBIT_SELECT_PAYMENT__', () => {
+    window.addEventListener(WINDOW_EVENT_SELECT_PAYMENT, () => {
       handlePaymentAutoSelection();
     });
 
