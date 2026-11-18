@@ -1,7 +1,7 @@
 /**
  * Bybit P2P Highlighter - Page Context Script (world: MAIN)
- * 1. Intercepts Bybit P2P network payloads directly in page context.
- * 2. Directly executes payment method auto-selection with full access to React props and Fiber.
+ * 1. Network Interceptor for Bybit P2P requests.
+ * 2. Instant Payment Method Auto-Selector (Mobile Top-up -> Bank Transfer) via direct React Fiber and rc-select handlers.
  */
 (() => {
   'use strict';
@@ -63,7 +63,6 @@
     }
   }
 
-  // Hook window.fetch
   if (typeof window.fetch === 'function') {
     const originalFetch = window.fetch;
     window.fetch = function (...args) {
@@ -87,7 +86,6 @@
     };
   }
 
-  // Hook XMLHttpRequest
   if (window.XMLHttpRequest && window.XMLHttpRequest.prototype) {
     const xhrProto = window.XMLHttpRequest.prototype;
     const originalOpen = xhrProto.open;
@@ -125,9 +123,9 @@
   }
 
   // ==========================================
-  // Part 2: React-Native Payment Auto-Selection
+  // Part 2: rc-select Payment Auto-Selection
   // ==========================================
-  const attemptedPaymentComponents = new WeakSet();
+  const attemptedTriggers = new WeakSet();
 
   function isUsdtRubBuyPage() {
     const href = window.location.href.toLowerCase();
@@ -146,13 +144,14 @@
     return false;
   }
 
-  function triggerFullClickSequence(element) {
+  // Dispatch both React Props & Native Pointer/Mouse sequence to an element
+  function triggerElementEvents(element) {
     if (!element) return;
 
-    // A. Invoke React props and React Fiber memoizedProps
+    // 1. Invoke React props and React Fiber memoizedProps
     let curr = element;
     let depth = 0;
-    while (curr && depth < 6) {
+    while (curr && depth < 5) {
       for (const k in curr) {
         if (k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$')) {
           const props = curr[k];
@@ -206,7 +205,7 @@
       depth++;
     }
 
-    // B. Native pointer and mouse sequence with coordinates
+    // 2. Full native mouse & pointer event sequence with exact coordinates
     const rect = element.getBoundingClientRect ? element.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
     const x = rect.left + (rect.width > 0 ? rect.width / 2 : 10);
     const y = rect.top + (rect.height > 0 ? rect.height / 2 : 10);
@@ -242,66 +241,64 @@
     try { element.click(); } catch (e) {}
   }
 
-  function findDropdownOptionElements(scopeRoot) {
-    const root = scopeRoot || document;
-    const all = Array.from(root.querySelectorAll('*'));
-    let mobileEl = null;
-    let bankEl = null;
+  // Find the exact option in Bybit's rc-select dropdown
+  function findTargetOptionInRcDropdown() {
+    const dropdown = document.querySelector('.fiat-p2p__payment-select-dropdown') ||
+                     document.querySelector('.rc-select-dropdown');
+    if (!dropdown) return null;
 
-    for (let i = 0; i < all.length; i++) {
-      const el = all[i];
+    const options = Array.from(dropdown.querySelectorAll('.fiat-p2p__payment-select-option, [role="option"], .rc-select-item-option'));
+    if (options.length === 0) return null;
 
-      if (['INPUT', 'TEXTAREA', 'BUTTON'].includes(el.tagName)) continue;
-      if (el.closest('.fiat-p2p__payment-select-comp')) continue;
-      if (el.closest('.payment-tags-container') || el.classList.contains('trade-list-tag')) continue;
-      if (el.closest('[class*="terms"], [class*="advertiser"]')) continue;
+    // Priority 1: Mobile Top-up
+    let match = options.find(el => {
+      const title = el.getAttribute('title') || (el.querySelector('[title]') && el.querySelector('[title]').getAttribute('title')) || '';
+      const text = el.innerText || el.textContent || '';
+      return title.includes('Mobile Top-up') || text.includes('Mobile Top-up');
+    });
 
-      const text = (el.innerText || el.textContent || '').trim();
-      if (!text) continue;
-
-      if (text.includes('Select A Payment Method') || text.includes('Select a payment method')) continue;
-      if (text.includes('Cash Deposit') && text.includes('Mobile Top-up')) continue;
-      if (text.includes('Cash Deposit') && text.includes('Bank Transfer')) continue;
-      if (text.includes('Bank Transfer') && text.includes('Mobile Top-up')) continue;
-
-      if (text.length > 40) continue;
-
-      if (!mobileEl && text.includes('Mobile Top-up')) {
-        mobileEl = el;
-      }
-      if (!bankEl && text.includes('Bank Transfer')) {
-        bankEl = el;
-      }
+    // Priority 2: Bank Transfer
+    if (!match) {
+      match = options.find(el => {
+        const title = el.getAttribute('title') || (el.querySelector('[title]') && el.querySelector('[title]').getAttribute('title')) || '';
+        const text = el.innerText || el.textContent || '';
+        return title.includes('Bank Transfer') || text.includes('Bank Transfer');
+      });
     }
 
-    return { mobileEl, bankEl };
+    return match || null;
   }
 
-  function clickTargetOptionAndParents(target) {
-    if (!target) return;
+  // Select the option via rc-select and DOM
+  function selectRcOption(optionElement) {
+    if (!optionElement) return;
 
-    triggerFullClickSequence(target);
+    // Trigger events on optionElement and its key inner components
+    triggerElementEvents(optionElement);
 
-    if (target.parentElement && !target.parentElement.classList.contains('fiat-p2p__payment-select-comp')) {
-      triggerFullClickSequence(target.parentElement);
+    const innerContent = optionElement.querySelector('.rc-select-item-option-content') ||
+                         optionElement.querySelector('[title]');
+    if (innerContent && innerContent !== optionElement) {
+      triggerElementEvents(innerContent);
     }
 
-    const itemContainer = target.closest('li, div[role="option"], div[class*="item"], div[class*="option"]');
-    if (itemContainer && itemContainer !== target && itemContainer !== target.parentElement) {
-      triggerFullClickSequence(itemContainer);
+    const textSpan = optionElement.querySelector('.moly-text');
+    if (textSpan && textSpan !== optionElement && textSpan !== innerContent) {
+      triggerElementEvents(textSpan);
     }
   }
 
-  function handleAutoSelectPayment() {
+  // Core Auto-Select Logic
+  function handlePaymentAutoSelection() {
     if (!isUsdtRubBuyPage()) return;
 
-    // Identify unselected payment method box
-    const unselectedComp = document.querySelector('.fiat-p2p__payment-select-comp--unselected') ||
-                           document.querySelector('[data-guide="payment-method"] .fiat-p2p__payment-select-comp');
+    // 1. Locate unselected payment selector
+    const trigger = document.querySelector('.fiat-p2p__payment-select-comp--unselected') ||
+                    document.querySelector('[data-guide="payment-method"] .fiat-p2p__payment-select-comp');
 
-    if (!unselectedComp) return;
+    if (!trigger) return;
 
-    const currentText = (unselectedComp.innerText || unselectedComp.textContent || '').trim();
+    const currentText = (trigger.innerText || trigger.textContent || '').trim();
     if (currentText.includes('Mobile Top-up') || currentText.includes('Bank Transfer')) {
       return;
     }
@@ -309,65 +306,53 @@
       return;
     }
 
-    if (attemptedPaymentComponents.has(unselectedComp) || unselectedComp.dataset.bybitPaymentAttempted === 'true') {
+    // 2. Check if dropdown is ALREADY open
+    const openOption = findTargetOptionInRcDropdown();
+    if (openOption) {
+      attemptedTriggers.add(trigger);
+      trigger.dataset.bybitPaymentAttempted = 'true';
+      selectRcOption(openOption);
       return;
     }
 
-    const guideRoot = unselectedComp.closest('[data-guide="payment-method"]') || document;
-
-    // 1. Check if dropdown option is ALREADY open / visible
-    let options = findDropdownOptionElements(guideRoot);
-    if (!options.mobileEl && !options.bankEl) {
-      options = findDropdownOptionElements(document);
-    }
-
-    const immediateTarget = options.mobileEl || options.bankEl;
-    if (immediateTarget) {
-      attemptedPaymentComponents.add(unselectedComp);
-      unselectedComp.dataset.bybitPaymentAttempted = 'true';
-
-      clickTargetOptionAndParents(immediateTarget);
+    // 3. Dropdown not open. Latch trigger so it NEVER enters an open/close loop
+    if (attemptedTriggers.has(trigger) || trigger.dataset.bybitPaymentAttempted === 'true') {
       return;
     }
 
-    // 2. Dropdown not open yet. Latch attempted flag so it NEVER runs in an open/close loop
-    attemptedPaymentComponents.add(unselectedComp);
-    unselectedComp.dataset.bybitPaymentAttempted = 'true';
+    attemptedTriggers.add(trigger);
+    trigger.dataset.bybitPaymentAttempted = 'true';
 
     // Suppress visual flicker
     document.body.classList.add('bybit-suppress-dropdown');
 
-    // Click trigger elements
-    const cursorPointer = unselectedComp.querySelector('.cursor-pointer') || unselectedComp;
-    triggerFullClickSequence(cursorPointer);
-    if (cursorPointer !== unselectedComp) {
-      triggerFullClickSequence(unselectedComp);
+    // Click trigger to open rc-select dropdown
+    const cursorPointer = trigger.querySelector('.cursor-pointer') || trigger;
+    triggerElementEvents(cursorPointer);
+    if (cursorPointer !== trigger) {
+      triggerElementEvents(trigger);
     }
 
-    // 3. Fast poll (every 15ms) for the option to mount
+    // 4. Poll rapidly (every 15ms) for the rc-select dropdown items to appear
     let attempts = 0;
     const maxAttempts = 30; // 450ms max
 
     const interval = setInterval(() => {
       attempts++;
 
-      const cur = (unselectedComp.innerText || unselectedComp.textContent || '').trim();
+      // Check if already selected
+      const cur = (trigger.innerText || trigger.textContent || '').trim();
       if (cur.includes('Mobile Top-up') || cur.includes('Bank Transfer')) {
         clearInterval(interval);
         document.body.classList.remove('bybit-suppress-dropdown');
         return;
       }
 
-      let currentOptions = findDropdownOptionElements(guideRoot);
-      if (!currentOptions.mobileEl && !currentOptions.bankEl) {
-        currentOptions = findDropdownOptionElements(document);
-      }
-
-      const target = currentOptions.mobileEl || currentOptions.bankEl;
-      if (target) {
+      // Check for dropdown options in rc-select
+      const targetOption = findTargetOptionInRcDropdown();
+      if (targetOption) {
         clearInterval(interval);
-
-        clickTargetOptionAndParents(target);
+        selectRcOption(targetOption);
 
         setTimeout(() => {
           document.body.classList.remove('bybit-suppress-dropdown');
@@ -382,14 +367,14 @@
     }, 15);
   }
 
-  // Event listener from content script
+  // Listen for trigger events from content script
   window.addEventListener('__BYBIT_SELECT_PAYMENT__', () => {
-    handleAutoSelectPayment();
+    handlePaymentAutoSelection();
   });
 
-  // Observe DOM for newly opened order forms
+  // Watch for order card open/expansion
   const observer = new MutationObserver(() => {
-    handleAutoSelectPayment();
+    handlePaymentAutoSelection();
   });
 
   if (document.body) {
@@ -400,5 +385,5 @@
     });
   }
 
-  setInterval(handleAutoSelectPayment, 300);
+  setInterval(handlePaymentAutoSelection, 250);
 })();

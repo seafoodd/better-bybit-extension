@@ -235,53 +235,32 @@
     }, 15);
   }
 
-  function findTargetPaymentOption(container) {
-    const scopeRoot = container.querySelector('[data-guide="payment-method"]') || container;
-    const all = Array.from(scopeRoot.querySelectorAll('*'));
-    const candidates = [];
+  function findTargetPaymentOption() {
+    // 1. Directly check Bybit's portalled rc-select dropdown on document.body
+    const dropdown = document.querySelector('.fiat-p2p__payment-select-dropdown') ||
+                     document.querySelector('.rc-select-dropdown');
+    if (dropdown) {
+      const options = Array.from(dropdown.querySelectorAll('.fiat-p2p__payment-select-option, [role="option"], .rc-select-item-option'));
+      if (options.length > 0) {
+        // Priority 1: Mobile Top-up
+        let match = options.find(el => {
+          const title = el.getAttribute('title') || (el.querySelector('[title]') && el.querySelector('[title]').getAttribute('title')) || '';
+          const text = el.innerText || el.textContent || '';
+          return title.includes('Mobile Top-up') || text.includes('Mobile Top-up');
+        });
 
-    for (let i = 0; i < all.length; i++) {
-      const el = all[i];
+        // Priority 2: Bank Transfer
+        if (!match) {
+          match = options.find(el => {
+            const title = el.getAttribute('title') || (el.querySelector('[title]') && el.querySelector('[title]').getAttribute('title')) || '';
+            const text = el.innerText || el.textContent || '';
+            return title.includes('Bank Transfer') || text.includes('Bank Transfer');
+          });
+        }
 
-      // Exclude form inputs or action buttons
-      if (['INPUT', 'TEXTAREA', 'BUTTON'].includes(el.tagName)) continue;
-
-      // Exclude selector trigger itself
-      if (el.closest('.fiat-p2p__payment-select-comp')) continue;
-
-      // Exclude static trade list tags
-      if (el.closest('.payment-tags-container') || el.classList.contains('trade-list-tag')) continue;
-
-      // Exclude advertiser terms
-      if (el.closest('[class*="terms"], [class*="advertiser"]') || el.closest('.left-content')) continue;
-
-      const t = (el.innerText || el.textContent || '').trim();
-      if (!t) continue;
-
-      if (t.includes('Select A Payment Method') || t.includes('Select a payment method')) continue;
-
-      // Exclude menu container holding all options together
-      if (t.includes('Cash Deposit') && t.includes('Mobile Top-up')) continue;
-      if (t.includes('Cash Deposit') && t.includes('Bank Transfer')) continue;
-      if (t.includes('Bank Transfer') && t.includes('Mobile Top-up')) continue;
-
-      // Length check: option item text is short
-      if (t.length > 40) continue;
-
-      if (t.includes('Mobile Top-up') || t.includes('Bank Transfer')) {
-        candidates.push({ el, text: t });
+        if (match) return match;
       }
     }
-
-    if (candidates.length === 0) return null;
-
-    // Priority 1: Mobile Top-up
-    const mobile = candidates.find(c => c.text.includes('Mobile Top-up'));
-    if (mobile) return mobile.el;
-
-    // Priority 2: Bank Transfer
-    const bank = candidates.find(c => c.text.includes('Bank Transfer'));
-    if (bank) return bank.el;
 
     return null;
   }
@@ -596,7 +575,7 @@
       });
     }
 
-    console.log('[Bybit Highlighter] Extension active (v1.0.8)');
+    console.log('[Bybit Highlighter] Extension active (v1.0.9)');
   }
 
   init();
