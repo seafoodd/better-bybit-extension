@@ -421,29 +421,50 @@ export default defineContentScript({
       return clean;
     }
 
+    function unwrapOldWrappers(container: HTMLElement) {
+      // Clean up any legacy dummy wrappers inserted by previous runs
+      const wrappers = Array.from(container.querySelectorAll<HTMLElement>('div.bybit-all-input-row'));
+      wrappers.forEach(w => {
+        if (!w.classList.contains('moly-space-item') && !w.classList.contains('moly-space-item-last') && w.parentElement) {
+          const p = w.parentElement;
+          while (w.firstChild) {
+            p.insertBefore(w.firstChild, w);
+          }
+          w.remove();
+        }
+      });
+    }
+
     function findPayAmountInput(container: HTMLElement): HTMLInputElement | null {
-      // 1. Search under "I will pay" / "Я заплачу" label
+      // 1. Direct Bybit amount-input selector
+      const directInput = container.querySelector<HTMLInputElement>(
+        '[data-guide="amount-input"] input, .fiat-p2p__amount-input-container input, .fiat-p2p__amount-input-field input'
+      );
+      if (directInput) return directInput;
+
+      // 2. Search under "I will pay" / "Я заплачу" label
       const allLabels = Array.from(container.querySelectorAll<HTMLElement>('*'));
       for (const el of allLabels) {
+        if (el.children.length > 2) continue;
         const t = (el.innerText || el.textContent || '').trim().toLowerCase();
-        if (t === 'i will pay' || t === 'я заплачу' || t.startsWith('i will pay')) {
-          const fieldWrapper = el.closest('div[class*="item"], div[class*="field"], div[class*="row"]') || el.parentElement;
-          if (fieldWrapper) {
-            const input = fieldWrapper.querySelector<HTMLInputElement>('input');
+        if (t === 'i will pay' || t === 'я заплачу' || t.startsWith('i will pay') || t.startsWith('я заплачу')) {
+          const row = el.closest('div[class*="item"], div[class*="field"], div[class*="row"], div[class*="wrapper"]') || el.parentElement;
+          if (row) {
+            const input = row.querySelector<HTMLInputElement>('input');
             if (input) return input;
-          }
-          if (el.nextElementSibling) {
-            const input = el.nextElementSibling.querySelector<HTMLInputElement>('input');
-            if (input) return input;
+            if (row.nextElementSibling) {
+              const nextInput = row.nextElementSibling.querySelector<HTMLInputElement>('input');
+              if (nextInput) return nextInput;
+            }
           }
         }
       }
 
-      // 2. Search for input with placeholder containing ~ (which is the amount limits)
+      // 3. Search for input with placeholder containing ~ (which is the amount limits)
       const inputsWithTilde = Array.from(container.querySelectorAll<HTMLInputElement>('input')).find(input => (input.placeholder || '').includes('~'));
       if (inputsWithTilde) return inputsWithTilde;
 
-      // 3. First text/number input in the container
+      // 4. First text/number input in the container
       const inputs = Array.from(container.querySelectorAll<HTMLInputElement>('input:not([type="checkbox"]):not([type="radio"])'));
       return inputs[0] || null;
     }
@@ -474,84 +495,49 @@ export default defineContentScript({
       }, 350);
     }
 
-    function findOuterInputBox(input: HTMLInputElement): HTMLElement {
-      let cur: HTMLElement = input;
-      let outerBox: HTMLElement = input;
-
-      while (cur && cur.parentElement) {
-        const parent = cur.parentElement;
-        if (parent.tagName === 'TR' || parent.id === 'root' || parent.classList.contains('bybit-all-input-row')) {
-          break;
-        }
-
-        const isOuterInput = cur.classList.contains('moly-input') || 
-                             cur.classList.contains('bds-input') ||
-                             cur.getAttribute('data-guide') === 'pay-amount-input';
-
-        if (isOuterInput) {
-          outerBox = cur;
-          break;
-        }
-
-        const hasSiblingLabel = Array.from(parent.children).some(child => {
-          if (child === cur || child.contains(cur)) return false;
-          const t = (child.textContent || '').trim().toLowerCase();
-          return t === 'i will pay' || t === 'я заплачу' || t.startsWith('i will pay') || t === 'i will receive';
-        });
-
-        if (hasSiblingLabel) {
-          outerBox = cur;
-          break;
-        }
-
-        cur = parent;
-      }
-
-      return outerBox;
-    }
-
     // Expose the "All" button prominently to the right of the price input (Strictly ONE button outside input)
     function exposeAllButton(container: HTMLElement) {
+      unwrapOldWrappers(container);
+
       const payInput = findPayAmountInput(container);
       if (!payInput) return;
 
-      const outerBox = findOuterInputBox(payInput);
-      if (!outerBox || !outerBox.parentElement) return;
+      // Find the outer input field container (.fiat-p2p__amount-input-field or .moly-input)
+      const inputField = container.querySelector<HTMLElement>('.fiat-p2p__amount-input-field') ||
+                         payInput.closest<HTMLElement>('.fiat-p2p__amount-input-field, .moly-input') ||
+                         payInput.parentElement;
+      if (!inputField || !inputField.parentElement) return;
 
-      // 1. Remove ANY rogue .bybit-prominent-all-btn inside outerBox
-      outerBox.querySelectorAll('.bybit-prominent-all-btn').forEach(b => b.remove());
+      // The native parent container (.moly-space-item-last) gets flex row layout
+      const parentRow = inputField.parentElement;
+      parentRow.classList.add('bybit-all-input-row');
 
-      // 2. Hide Bybit's native internal orange "All" button inside outerBox so it NEVER renders inside input
-      let nativeAllBtn: HTMLElement | null = null;
-      const allCandidates = Array.from(outerBox.querySelectorAll<HTMLElement>('*'));
-      for (const el of allCandidates) {
+      // 1. Hide Bybit's native internal orange "All" text/button inside inputField so it never appears inside input
+      const fieldLeaves = Array.from(inputField.querySelectorAll<HTMLElement>('*'));
+      for (const el of fieldLeaves) {
+        if (el.tagName === 'INPUT' || el.tagName === 'IMG' || el.tagName === 'SVG' || el.tagName === 'PATH') continue;
         if (el.classList.contains('bybit-prominent-all-btn')) {
           el.remove();
           continue;
         }
-        const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+        const t = (el.textContent || '').trim().toLowerCase();
         if ((t === 'all' || t === 'все' || t === 'max') && el.children.length === 0) {
-          nativeAllBtn = el;
           el.classList.add('bybit-native-all-hidden');
           el.style.setProperty('display', 'none', 'important');
         }
       }
 
-      // 3. Ensure outerBox is cleanly wrapped in .bybit-all-input-row
-      let rowWrapper = outerBox.parentElement;
-      if (!rowWrapper.classList.contains('bybit-all-input-row')) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'bybit-all-input-row';
-        outerBox.parentNode?.insertBefore(wrapper, outerBox);
-        wrapper.appendChild(outerBox);
-        rowWrapper = wrapper;
-      }
+      // 2. Remove ANY .bybit-prominent-all-btn inside inputField or elsewhere in container that is misplaced
+      container.querySelectorAll('.bybit-prominent-all-btn').forEach(btn => {
+        if (btn.parentElement !== parentRow) {
+          btn.remove();
+        }
+      });
 
-      // 4. Ensure there is EXACTLY ONE external "ALL" button in rowWrapper, directly to the right of outerBox
-      const existingBtns = Array.from(rowWrapper.querySelectorAll<HTMLButtonElement>('.bybit-prominent-all-btn'));
+      // 3. Ensure EXACTLY ONE .bybit-prominent-all-btn exists as a direct child of parentRow
+      const existingBtns = Array.from(parentRow.querySelectorAll<HTMLButtonElement>(':scope > .bybit-prominent-all-btn'));
       let externalAllBtn = existingBtns[0] || null;
 
-      // Remove any extra duplicate buttons
       if (existingBtns.length > 1) {
         for (let i = 1; i < existingBtns.length; i++) {
           existingBtns[i].remove();
@@ -569,24 +555,36 @@ export default defineContentScript({
           e.preventDefault();
           e.stopPropagation();
 
-          // 1. Trigger native All button if present
-          if (nativeAllBtn) {
-            simulateUserClick(nativeAllBtn);
+          // Search live for native All button in suffix
+          const suffix = inputField.querySelector<HTMLElement>('.fiat-p2p__amount-input-suffix') || inputField;
+          let targetNativeAll: HTMLElement | null = null;
+          const leaves = Array.from(suffix.querySelectorAll<HTMLElement>('*'));
+          for (const el of leaves) {
+            if (el.tagName === 'INPUT' || el.tagName === 'IMG' || el.tagName === 'SVG' || el.tagName === 'PATH') continue;
+            const t = (el.textContent || '').trim().toLowerCase();
+            if ((t === 'all' || t === 'все' || t === 'max') && el.children.length === 0) {
+              targetNativeAll = el;
+              break;
+            }
           }
 
-          // 2. Also extract max value from placeholder (e.g. "1,813.00 ~ 1,813.00")
-          const placeholder = payInput.placeholder || '';
-          const maxMatch = placeholder.match(/~\s*([\d\s,.]+)/) || placeholder.match(/([\d\s,.]+)\s*$/);
-          if (maxMatch && maxMatch[1]) {
-            insertPriceValue(container, cleanNumberString(maxMatch[1]));
+          if (targetNativeAll) {
+            simulateUserClick(targetNativeAll);
+          } else {
+            // Fallback: extract max value from placeholder
+            const placeholder = payInput.placeholder || '';
+            const maxMatch = placeholder.match(/~\s*([\d\s,.]+)/) || placeholder.match(/([\d\s,.]+)\s*$/);
+            if (maxMatch && maxMatch[1]) {
+              insertPriceValue(container, cleanNumberString(maxMatch[1]));
+            }
           }
         });
 
-        rowWrapper.appendChild(externalAllBtn);
+        parentRow.appendChild(externalAllBtn);
       } else {
-        // Ensure externalAllBtn is placed AFTER outerBox
-        if (externalAllBtn.previousElementSibling !== outerBox) {
-          rowWrapper.appendChild(externalAllBtn);
+        // Ensure externalAllBtn is placed AFTER inputField
+        if (externalAllBtn.previousElementSibling !== inputField) {
+          parentRow.appendChild(externalAllBtn);
         }
       }
     }
@@ -985,6 +983,11 @@ export default defineContentScript({
         }
       });
       document.querySelectorAll('.bybit-prominent-all-btn').forEach(el => el.remove());
+      document.querySelectorAll('.bybit-all-input-row').forEach(el => el.classList.remove('bybit-all-input-row'));
+      document.querySelectorAll('.bybit-native-all-hidden').forEach(el => {
+        el.classList.remove('bybit-native-all-hidden');
+        (el as HTMLElement).style.display = '';
+      });
     }
 
     function escapeHtml(str: string): string {

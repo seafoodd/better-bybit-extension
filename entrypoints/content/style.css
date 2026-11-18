@@ -172,24 +172,32 @@ body.bybit-suppress-dropdown [data-guide="payment-method"] > div:nth-child(2) {
 }
 
 /* 6. Prominent "ALL" Button strictly outside the price input */
-.bybit-all-input-row,
-.bybit-all-btn-wrapper {
+.bybit-all-input-row {
   display: flex !important;
-  align-items: center !important;
+  flex-direction: row !important;
+  align-items: stretch !important;
   width: 100% !important;
   gap: 8px !important;
 }
 
-.bybit-all-input-row > *:first-child,
-.bybit-all-btn-wrapper > *:first-child {
-  flex: 1 1 auto !important;
+.bybit-all-input-row > .fiat-p2p__amount-input-field,
+.bybit-all-input-row > .moly-input {
+  flex: 1 1 0% !important;
   min-width: 0 !important;
+  width: 100% !important;
+  display: flex !important;
 }
 
-/* Hide any native or internal All buttons inside the input box */
-.bybit-native-all-hidden,
-.bybit-all-input-row .moly-input [class*="all"],
-.bybit-all-input-row [class*="input__suffix"] > span:first-child:not(:last-child) {
+.bybit-all-input-row input {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+.bybit-native-all-hidden {
   display: none !important;
 }
 
@@ -198,11 +206,12 @@ body.bybit-suppress-dropdown [data-guide="payment-method"] > div:nth-child(2) {
   align-items: center !important;
   justify-content: center !important;
   padding: 0 16px !important;
-  height: 48px !important;
+  min-height: 48px !important;
+  height: auto !important;
   border-radius: 8px !important;
-  border: 1px solid #10b981 !important;
-  background: rgba(16, 185, 129, 0.12) !important;
-  color: #10b981 !important;
+  border: 1px solid var(--bybit-hl-border) !important;
+  background: var(--bybit-hl-bg) !important;
+  color: var(--bybit-hl-border) !important;
   font-family: inherit !important;
   font-size: 14px !important;
   font-weight: 700 !important;
@@ -215,20 +224,20 @@ body.bybit-suppress-dropdown [data-guide="payment-method"] > div:nth-child(2) {
 }
 
 .bybit-prominent-all-btn:hover {
-  background: #10b981 !important;
+  background: var(--bybit-hl-border) !important;
   color: #ffffff !important;
-  border-color: #10b981 !important;
+  border-color: var(--bybit-hl-border) !important;
   box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4) !important;
   transform: translateY(-1px) !important;
 }
 
 .bybit-prominent-all-btn:active {
   transform: translateY(0) !important;
-  background: #059669 !important;
+  opacity: 0.85 !important;
 }
 
 .bybit-input-flashed {
-  outline: 2px solid #10b981 !important;
+  outline: 2px solid var(--bybit-hl-border) !important;
   box-shadow: 0 0 8px rgba(16, 185, 129, 0.5) !important;
   transition: all 0.25s ease !important;
 }
