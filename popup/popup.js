@@ -9,10 +9,7 @@
   let currentSettings = {
     enabled: true,
     keywords: ['СБП', 'телефона'],
-    highlightColor: 'emerald',
-    showRemarkPreview: true,
-    dimNonMatching: false,
-    hideNonMatching: false
+    highlightColor: 'emerald'
   };
 
   // DOM Elements
@@ -24,9 +21,6 @@
   const tagsContainer = document.getElementById('tags-container');
   const quickChips = document.querySelectorAll('.quick-chip');
   const colorButtons = document.querySelectorAll('.color-btn');
-  const showRemarkToggle = document.getElementById('show-remark-toggle');
-  const dimToggle = document.getElementById('dim-toggle');
-  const hideToggle = document.getElementById('hide-toggle');
 
   // 1. Load settings on popup open
   function init() {
@@ -35,7 +29,7 @@
         currentSettings = { ...currentSettings, ...stored };
       }
       applySettingsToUI();
-      queryActiveTabStatus();
+      updateStatusBanner();
     });
 
     setupEventListeners();
@@ -43,9 +37,6 @@
 
   function applySettingsToUI() {
     masterToggle.checked = !!currentSettings.enabled;
-    showRemarkToggle.checked = !!currentSettings.showRemarkPreview;
-    dimToggle.checked = !!currentSettings.dimNonMatching;
-    hideToggle.checked = !!currentSettings.hideNonMatching;
 
     // Color buttons
     colorButtons.forEach(btn => {
@@ -80,7 +71,7 @@
 
     // Remove buttons
     tagsContainer.querySelectorAll('.keyword-tag-remove').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener('click', () => {
         const idx = parseInt(btn.dataset.index, 10);
         removeKeyword(idx);
       });
@@ -109,6 +100,7 @@
   function saveSettings() {
     api.storage.local.set(currentSettings, () => {
       notifyContentScript();
+      updateStatusBanner();
     });
   }
 
@@ -119,15 +111,13 @@
           type: 'UPDATE_SETTINGS',
           settings: currentSettings
         }, () => {
-          // Ignore runtime errors if content script is not injected on this tab
           if (api.runtime.lastError) {}
-          queryActiveTabStatus();
         });
       }
     });
   }
 
-  function queryActiveTabStatus() {
+  function updateStatusBanner() {
     if (!currentSettings.enabled) {
       statusBanner.className = 'status-banner offline';
       statusText.textContent = 'Подсветка отключена';
@@ -142,45 +132,33 @@
         return;
       }
 
-      api.tabs.sendMessage(tab.id, { type: 'GET_STATUS' }, (response) => {
-        if (api.runtime.lastError || !response) {
-          statusBanner.className = 'status-banner';
-          statusText.textContent = 'Bybit открыт (обновите страницу)';
-          return;
-        }
-
-        statusBanner.className = 'status-banner';
-        if (response.totalRowsCount > 0) {
-          statusText.innerHTML = `Найдено <strong>${response.matchedCount}</strong> из <strong>${response.totalRowsCount}</strong> заказов`;
-        } else {
-          statusText.textContent = 'Ожидание списка заказов...';
-        }
-      });
+      statusBanner.className = 'status-banner';
+      if (tab.url.includes('USDT/RUB') || tab.url.includes('usdt/rub')) {
+        statusText.textContent = '🟢 Активно (USDT/RUB: авто-выбор Mobile Top-up)';
+      } else {
+        statusText.textContent = '🟢 Активно на Bybit P2P';
+      }
     });
   }
 
   function setupEventListeners() {
-    // Master Toggle
     masterToggle.addEventListener('change', () => {
       currentSettings.enabled = masterToggle.checked;
       saveSettings();
     });
 
-    // Add keyword form
     keywordForm.addEventListener('submit', (e) => {
       e.preventDefault();
       addKeyword(keywordInput.value);
       keywordInput.value = '';
     });
 
-    // Quick chips
     quickChips.forEach(chip => {
       chip.addEventListener('click', () => {
         addKeyword(chip.dataset.kw);
       });
     });
 
-    // Color buttons
     colorButtons.forEach(btn => {
       btn.addEventListener('click', () => {
         colorButtons.forEach(b => b.classList.remove('active'));
@@ -188,30 +166,6 @@
         currentSettings.highlightColor = btn.dataset.color;
         saveSettings();
       });
-    });
-
-    // Checkboxes
-    showRemarkToggle.addEventListener('change', () => {
-      currentSettings.showRemarkPreview = showRemarkToggle.checked;
-      saveSettings();
-    });
-
-    dimToggle.addEventListener('change', () => {
-      currentSettings.dimNonMatching = dimToggle.checked;
-      if (currentSettings.dimNonMatching) {
-        currentSettings.hideNonMatching = false;
-        hideToggle.checked = false;
-      }
-      saveSettings();
-    });
-
-    hideToggle.addEventListener('change', () => {
-      currentSettings.hideNonMatching = hideToggle.checked;
-      if (currentSettings.hideNonMatching) {
-        currentSettings.dimNonMatching = false;
-        dimToggle.checked = false;
-      }
-      saveSettings();
     });
   }
 

@@ -28,7 +28,7 @@
   --bybit-hl-badge-gradient: linear-gradient(135deg, #9333ea, #a855f7);
 }
 
-/* 1. Highlighted Order Row & Expanded Card - Solid Left Stripe */
+/* 1. Solid Left Stripe for Highlighted Order & Expanded Card */
 .bybit-p2p-highlighted-order {
   border-left: 4px solid var(--bybit-hl-border) !important;
   border-top-left-radius: 0 !important;
@@ -38,7 +38,6 @@
   transition: border-color 0.2s ease, background-color 0.2s ease !important;
 }
 
-/* Highlight the expanded terms card with the same solid green left border */
 .bybit-p2p-highlighted-card {
   border-left: 4px solid var(--bybit-hl-border) !important;
   border-top-left-radius: 0 !important;
@@ -46,7 +45,6 @@
   position: relative !important;
 }
 
-/* In case of child containers masking the left edge */
 .bybit-p2p-highlighted-order > div {
   border-top-left-radius: 0 !important;
   border-bottom-left-radius: 0 !important;
@@ -66,12 +64,12 @@
   vertical-align: baseline !important;
 }
 
-/* 3. Match Badge (Top Placement) */
+/* 3. Match Badge placed right next to Price xx.xx RUB xxs */
 .bybit-p2p-match-container {
   display: inline-flex !important;
   align-items: center !important;
-  gap: 6px !important;
-  margin: 0 8px !important;
+  gap: 4px !important;
+  margin-left: 10px !important;
   vertical-align: middle !important;
 }
 
@@ -90,6 +88,7 @@
   user-select: none !important;
   cursor: default !important;
   transition: transform 0.15s ease !important;
+  white-space: nowrap !important;
 }
 
 .bybit-p2p-match-tag:hover {
@@ -98,97 +97,4 @@
 
 .bybit-p2p-match-tag .bybit-tag-icon {
   font-size: 11px !important;
-}
-
-/* 4. Dimmed / Hidden Non-matching Rows */
-.bybit-p2p-dimmed-order {
-  opacity: 0.35 !important;
-  filter: grayscale(40%) !important;
-  transition: opacity 0.2s ease !important;
-}
-
-.bybit-p2p-dimmed-order:hover {
-  opacity: 0.9 !important;
-  filter: none !important;
-}
-
-.bybit-p2p-hidden-order {
-  display: none !important;
-}
-
-/* 5. Floating Quick Status Widget */
-#bybit-p2p-floating-widget {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  z-index: 999999;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: rgba(18, 22, 31, 0.92);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5), 0 0 15px rgba(16, 185, 129, 0.2);
-  border-radius: 30px;
-  padding: 7px 14px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  font-size: 12px;
-  color: #f1f5f9;
-  user-select: none;
-}
-
-#bybit-p2p-floating-widget:hover {
-  border-color: var(--bybit-hl-border);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(16, 185, 129, 0.35);
-}
-
-.bybit-fw-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--bybit-hl-badge-gradient);
-  font-size: 11px;
-}
-
-.bybit-fw-counter {
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.bybit-fw-counter strong {
-  color: var(--bybit-hl-border);
-  font-size: 13px;
-}
-
-.bybit-fw-divider {
-  width: 1px;
-  height: 14px;
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.bybit-fw-btn {
-  background: none;
-  border: none;
-  color: #94a3b8;
-  font-size: 13px;
-  cursor: pointer;
-  padding: 3px 6px;
-  border-radius: 6px;
-  line-height: 1;
-  transition: color 0.15s ease;
-}
-
-.bybit-fw-btn:hover {
-  color: #ffffff;
-}
-
-.bybit-fw-btn.active {
-  color: var(--bybit-hl-border);
-  background: rgba(16, 185, 129, 0.15);
 }

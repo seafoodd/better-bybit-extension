@@ -1,33 +1,25 @@
 /**
  * Bybit P2P Order Highlighter - Content Script
- * Highlights keywords in Bybit P2P orders (СБП, телефона) with green background & white text,
- * positions the badge at the top, and renders a clean, solid green left stripe.
+ * 1. Highlights keywords in terms text (green background, white text).
+ * 2. Positions the badge right next to "Price xx.xx RUB xxs".
+ * 3. Auto-selects "Mobile Top-up" (or fallback "Bank Transfer") on USDT/RUB buy pages.
+ * 4. Renders a continuous solid green left stripe.
  */
 (() => {
   'use strict';
 
-  // Cross-browser compatibility wrapper
   const api = typeof browser !== 'undefined' ? browser : chrome;
 
-  // State
   const state = {
     settings: {
       enabled: true,
       keywords: ['СБП', 'телефона'],
-      highlightColor: 'emerald',
-      dimNonMatching: false,
-      hideNonMatching: false
+      highlightColor: 'emerald'
     },
-    itemsById: new Map(),
-    itemsByKey: new Map(),
-    itemsByNick: new Map(),
-    itemsByUserId: new Map(),
-    matchedCount: 0,
-    totalRowsCount: 0,
     highlightTimeout: null
   };
 
-  // 1. Load and sync settings
+  // 1. Settings & Themes
   function loadSettings() {
     try {
       api.storage.local.get(state.settings, (items) => {
@@ -37,12 +29,9 @@
           scheduleHighlight(0);
         }
       });
-    } catch (e) {
-      console.warn('[Bybit Highlighter] Storage get failed:', e);
-    }
+    } catch (e) {}
   }
 
-  // Listen for storage changes
   try {
     api.storage.onChanged.addListener((changes, area) => {
       if (area === 'local') {
@@ -61,16 +50,12 @@
     });
   } catch (e) {}
 
-  // Listen for direct messages from popup
   try {
     api.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.type === 'GET_STATUS') {
         sendResponse({
           enabled: state.settings.enabled,
-          keywords: state.settings.keywords,
-          matchedCount: state.matchedCount,
-          totalRowsCount: state.totalRowsCount,
-          itemsCached: state.itemsById.size
+          keywords: state.settings.keywords
         });
         return true;
       }
@@ -88,57 +73,91 @@
     document.documentElement.setAttribute('data-bybit-theme', color || 'emerald');
   }
 
-  // 2. Inject Page-Context Interceptor Fallback
-  function injectPageInterceptor() {
-    try {
-      const script = document.createElement('script');
-      script.src = api.runtime.getURL('content/injected.js');
-      script.async = false;
-      script.onload = () => script.remove();
-      (document.head || document.documentElement).appendChild(script);
-    } catch (e) {}
-
-    window.addEventListener('message', (event) => {
-      if (event.source !== window) return;
-      if (event.data && event.data.type === '__BYBIT_P2P_DATA__' && event.data.text) {
-        processApiPayload(event.data.text, event.data.url);
-      }
-    });
+  // 2. USDT/RUB Page Detection
+  function isUsdtRubPage() {
+    const href = window.location.href.toLowerCase();
+    return href.includes('usdt') && href.includes('rub');
   }
 
-  // 3. Process API Payload
-  function processApiPayload(text, url) {
-    if (!text || typeof text !== 'string') return;
-    try {
-      const data = JSON.parse(text);
-      let items = [];
+  // 3. Auto-Select Payment Method ("Mobile Top-up" -> "Bank Transfer")
+  function autoSelectPaymentMethod(card) {
+    if (!isUsdtRubPage()) return;
+    if (card.__paymentAutoSelected) return;
 
-      if (Array.isArray(data?.result?.items)) {
-        items = data.result.items;
-      } else if (Array.isArray(data?.result?.list)) {
-        items = data.result.list;
-      } else if (Array.isArray(data?.items)) {
-        items = data.items;
-      } else if (Array.isArray(data?.result)) {
-        items = data.result;
-      }
+    // Find the payment method dropdown trigger inside the card
+    const selectorEl = findPaymentMethodSelector(card);
+    if (!selectorEl) return;
 
-      if (!items || items.length === 0) return;
+    const currentText = (selectorEl.textContent || '').trim();
+    // If a payment method is already selected, mark as done
+    if (currentText.includes('Mobile Top-up') || currentText.includes('Bank Transfer')) {
+      card.__paymentAutoSelected = true;
+      return;
+    }
 
-      items.forEach(item => {
-        if (!item) return;
-        if (item.id) state.itemsById.set(String(item.id), item);
-        if (item.userId) state.itemsByUserId.set(String(item.userId), item);
-        if (item.nickName) {
-          const nickLower = item.nickName.trim().toLowerCase();
-          state.itemsByNick.set(nickLower, item);
-          const priceKey = `${nickLower}__${parseFloat(item.price || 0)}`;
-          state.itemsByKey.set(priceKey, item);
-        }
+    // Only proceed if it is in the unselected placeholder state
+    if (!currentText.toLowerCase().includes('select') && !currentText.toLowerCase().includes('выберите')) {
+      return;
+    }
+
+    card.__paymentAutoSelected = true;
+
+    // Open the dropdown
+    selectorEl.click();
+    selectorEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+
+    // Try finding and clicking the option
+    function tryClickOption() {
+      // Find all options in document
+      const allElements = Array.from(document.querySelectorAll('div, li, span, p')).filter(el => {
+        if (el.offsetWidth === 0 && el.offsetHeight === 0) return false;
+        const t = (el.textContent || '').trim();
+        return t === 'Mobile Top-up' || t === 'Bank Transfer';
       });
 
-      scheduleHighlight(10);
-    } catch (e) {}
+      // Priority 1: Mobile Top-up
+      let target = allElements.find(el => el.textContent.trim() === 'Mobile Top-up');
+      // Priority 2: Bank Transfer
+      if (!target) {
+        target = allElements.find(el => el.textContent.trim() === 'Bank Transfer');
+      }
+
+      if (target) {
+        target.click();
+        target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+        return true;
+      }
+      return false;
+    }
+
+    // Schedule attempts after dropdown opens
+    setTimeout(() => {
+      if (!tryClickOption()) {
+        setTimeout(() => {
+          if (!tryClickOption()) {
+            setTimeout(tryClickOption, 250);
+          }
+        }, 150);
+      }
+    }, 100);
+  }
+
+  function findPaymentMethodSelector(card) {
+    const candidates = Array.from(card.querySelectorAll('div, button, input')).filter(el => {
+      const text = (el.textContent || '').trim();
+      return text.includes('Select A Payment Method') || 
+             text.includes('Select a payment method') || 
+             text.includes('Select Payment Method') ||
+             text.includes('Выберите способ оплаты') ||
+             text.includes('Выберите метод оплаты');
+    });
+
+    if (candidates.length === 0) return null;
+
+    // Return the innermost matching container or clickable element
+    const target = candidates[candidates.length - 1];
+    return target.closest('div[tabindex], div[class*="select"], button') || target;
   }
 
   // 4. Keyword Matching
@@ -163,83 +182,7 @@
     return matched;
   }
 
-  // 5. DOM Discovery
-  function findAllOrderRows() {
-    const allButtons = Array.from(document.querySelectorAll('button')).filter(btn => {
-      const txt = (btn.textContent || '').trim().toLowerCase();
-      return txt.startsWith('buy') || txt.startsWith('sell') || 
-             txt.startsWith('купить') || txt.startsWith('продать') ||
-             txt === 'hide' || txt === 'скрыть';
-    });
-
-    if (allButtons.length > 0) {
-      const rows = [];
-      allButtons.forEach(btn => {
-        let cur = btn.parentElement;
-        while (cur && cur !== document.body) {
-          const parent = cur.parentElement;
-          if (parent) {
-            const siblingButtons = Array.from(parent.children).filter(child => {
-              return child.querySelector && child.querySelector('button');
-            });
-            if (siblingButtons.length >= 2) {
-              const text = cur.textContent || '';
-              if (text.includes('RUB') || text.includes('USDT') || text.includes('Order') || text.includes('Заказ')) {
-                rows.push(cur);
-                break;
-              }
-            }
-          }
-          cur = cur.parentElement;
-        }
-      });
-
-      if (rows.length > 0) {
-        return Array.from(new Set(rows));
-      }
-    }
-
-    const trs = Array.from(document.querySelectorAll('tbody tr, table tr')).filter(tr => {
-      const text = tr.innerText || '';
-      return !tr.querySelector('th') && (text.includes('RUB') || text.includes('USDT') || text.includes('Buy') || text.includes('Купить'));
-    });
-    if (trs.length > 0) return trs;
-
-    return Array.from(document.querySelectorAll(
-      'div[class*="trade-table__row"], div[class*="table-row"], div[class*="trade-row"], div[class*="advertiser-item"], div[class*="otc-item"]'
-    ));
-  }
-
-  function findItemForOrderRow(row) {
-    const rowHtml = row.innerHTML || '';
-    const rowText = (row.textContent || '').trim();
-    const rowTextLower = rowText.toLowerCase();
-
-    for (const [id, item] of state.itemsById.entries()) {
-      if (rowHtml.includes(id)) return item;
-    }
-
-    for (const [userId, item] of state.itemsByUserId.entries()) {
-      if (rowHtml.includes(userId)) return item;
-    }
-
-    for (const [key, item] of state.itemsByKey.entries()) {
-      if (item.nickName) {
-        const nickLower = item.nickName.trim().toLowerCase();
-        if (rowTextLower.includes(nickLower)) {
-          if (item.price && rowText.includes(item.price)) return item;
-        }
-      }
-    }
-
-    for (const [nick, item] of state.itemsByNick.entries()) {
-      if (rowTextLower.includes(nick)) return item;
-    }
-
-    return null;
-  }
-
-  // 6. Highlight Keywords in Text Nodes (Green background + White text)
+  // 5. Highlight Keywords in Text Nodes (Green background + White text)
   function highlightKeywordsInTextNodes(container, keywords) {
     if (!container || !keywords || keywords.length === 0) return;
 
@@ -261,7 +204,7 @@
           if (['script', 'style', 'input', 'textarea', 'button', 'mark'].includes(tag)) {
             return NodeFilter.FILTER_REJECT;
           }
-          if (parent.closest('.bybit-p2p-match-container') || parent.closest('#bybit-p2p-floating-widget')) {
+          if (parent.closest('.bybit-p2p-match-container')) {
             return NodeFilter.FILTER_REJECT;
           }
           return NodeFilter.FILTER_ACCEPT;
@@ -302,83 +245,52 @@
     });
   }
 
-  // 7. Highlight and Decorate Rows
-  function highlightOrders() {
-    if (!state.settings.enabled) {
-      removeAllHighlights();
-      updateFloatingWidget(0, 0);
-      return;
-    }
-
-    const keywords = getActiveKeywords();
-    if (keywords.length === 0) {
-      removeAllHighlights();
-      updateFloatingWidget(0, 0);
-      return;
-    }
-
-    const rows = findAllOrderRows();
-    state.totalRowsCount = rows.length;
-    let matchedCount = 0;
-
-    rows.forEach(row => {
-      const item = findItemForOrderRow(row);
-      const rowText = row.textContent || '';
-
-      const remarkMatches = item && item.remark ? findMatchesInText(item.remark, keywords) : [];
-      const textMatches = findMatchesInText(rowText, keywords);
-
-      const allMatches = Array.from(new Set([...remarkMatches, ...textMatches]));
-      const isMatch = allMatches.length > 0;
-
-      if (isMatch) {
-        matchedCount++;
-
-        // A. Apply clean green left stripe to row
-        row.classList.add('bybit-p2p-highlighted-order');
-        row.classList.remove('bybit-p2p-dimmed-order', 'bybit-p2p-hidden-order');
-
-        // B. If row is expanded, find the expanded card and apply green left stripe to it as well
-        const expandedCard = findExpandedCard(row);
-        if (expandedCard) {
-          expandedCard.classList.add('bybit-p2p-highlighted-card');
-        }
-
-        // C. Highlight matching keywords inside the text (green background, white text)
-        highlightKeywordsInTextNodes(row, keywords);
-
-        // D. Place badge AT THE TOP (in title of Advertiser Terms or next to payment methods)
-        renderTopBadge(row, expandedCard, allMatches);
-      } else {
-        row.classList.remove('bybit-p2p-highlighted-order');
-        const expandedCard = findExpandedCard(row);
-        if (expandedCard) expandedCard.classList.remove('bybit-p2p-highlighted-card');
-        removeBadges(row);
-
-        if (state.settings.hideNonMatching) {
-          row.classList.add('bybit-p2p-hidden-order');
-          row.classList.remove('bybit-p2p-dimmed-order');
-        } else if (state.settings.dimNonMatching) {
-          row.classList.add('bybit-p2p-dimmed-order');
-          row.classList.remove('bybit-p2p-hidden-order');
-        } else {
-          row.classList.remove('bybit-p2p-dimmed-order', 'bybit-p2p-hidden-order');
-        }
-      }
+  // 6. DOM Discovery & Card Processing
+  function findOrderContainers() {
+    // Look for all order cards / containers on the page
+    const buttons = Array.from(document.querySelectorAll('button')).filter(btn => {
+      const txt = (btn.textContent || '').trim().toLowerCase();
+      return txt.startsWith('buy') || txt.startsWith('sell') || 
+             txt.startsWith('купить') || txt.startsWith('продать') ||
+             txt === 'hide' || txt === 'скрыть';
     });
 
-    state.matchedCount = matchedCount;
-    updateFloatingWidget(matchedCount, rows.length);
+    if (buttons.length > 0) {
+      const rows = [];
+      buttons.forEach(btn => {
+        let cur = btn.parentElement;
+        while (cur && cur !== document.body) {
+          const parent = cur.parentElement;
+          if (parent) {
+            const siblingButtons = Array.from(parent.children).filter(child => {
+              return child.querySelector && child.querySelector('button');
+            });
+            if (siblingButtons.length >= 2) {
+              const text = cur.textContent || '';
+              if (text.includes('RUB') || text.includes('USDT') || text.includes('Order') || text.includes('Заказ')) {
+                rows.push(cur);
+                break;
+              }
+            }
+          }
+          cur = cur.parentElement;
+        }
+      });
+      if (rows.length > 0) {
+        return Array.from(new Set(rows));
+      }
+    }
+
+    return [];
   }
 
   function findExpandedCard(row) {
-    // Look for the expanded container with "Advertiser Terms" or "I will pay"
     const candidates = Array.from(row.querySelectorAll('div')).filter(div => {
       const text = div.textContent || '';
-      return text.includes('Advertiser Terms') || text.includes('Условия рекламодателя') || text.includes('I will pay');
+      return (text.includes('Advertiser Terms') || text.includes('Условия рекламодателя')) && 
+             (text.includes('I will pay') || text.includes('Price') || text.includes('Buy'));
     });
     if (candidates.length > 0) {
-      // Find the outermost card container for this section
       let card = candidates[0];
       while (card && card.parentElement && card.parentElement !== row) {
         if (card.parentElement.children.length === 1 || card.parentElement.classList.contains('bybit-p2p-highlighted-order')) {
@@ -391,60 +303,94 @@
     return null;
   }
 
-  // Render badge AT THE TOP (never at the bottom)
-  function renderTopBadge(row, expandedCard, matchedKeywords) {
+  // Find the "Price xx.xx RUB xxs" element inside the expanded card
+  function findPriceHeaderElement(card) {
+    const candidates = Array.from(card.querySelectorAll('div, span, p')).filter(el => {
+      const text = (el.textContent || '').trim();
+      return (text.startsWith('Price') || text.startsWith('Цена')) && 
+             (text.includes('RUB') || text.includes('USDT')) &&
+             (text.includes('s') || text.includes('сек') || /\d+\.\d+/.test(text));
+    });
+
+    if (candidates.length === 0) return null;
+
+    // Pick the most specific flex container that holds the price text
+    let target = candidates[0];
+    for (const c of candidates) {
+      if (c.children.length > 0 && (c.innerText || '').includes('Price')) {
+        target = c;
+      }
+    }
+    return target;
+  }
+
+  // 7. Core Highlight Execution
+  function highlightOrders() {
+    // Clean up any old floating widget if present
+    const oldWidget = document.getElementById('bybit-p2p-floating-widget');
+    if (oldWidget) oldWidget.remove();
+
+    if (!state.settings.enabled) {
+      removeAllHighlights();
+      return;
+    }
+
+    const keywords = getActiveKeywords();
+    if (keywords.length === 0) {
+      removeAllHighlights();
+      return;
+    }
+
+    const containers = findOrderContainers();
+
+    containers.forEach(row => {
+      const expandedCard = findExpandedCard(row);
+
+      // 1. Auto-select payment method if card is expanded on USDT/RUB page
+      if (expandedCard) {
+        autoSelectPaymentMethod(expandedCard);
+      }
+
+      // 2. Check if terms contain keywords
+      const text = row.textContent || '';
+      const matched = findMatchesInText(text, keywords);
+      const isMatch = matched.length > 0;
+
+      if (isMatch) {
+        // Apply solid green left stripe
+        row.classList.add('bybit-p2p-highlighted-order');
+        if (expandedCard) {
+          expandedCard.classList.add('bybit-p2p-highlighted-card');
+        }
+
+        // Highlight matched keywords inside text (green background, white text)
+        highlightKeywordsInTextNodes(row, keywords);
+
+        // Position badge immediately to the right of "Price xx.xx RUB xxs"
+        renderBadgeNextToPrice(expandedCard || row, matched);
+      } else {
+        row.classList.remove('bybit-p2p-highlighted-order');
+        if (expandedCard) expandedCard.classList.remove('bybit-p2p-highlighted-card');
+        removeBadges(row);
+      }
+    });
+  }
+
+  // Place the badge immediately to the right of Price xx.xx RUB xxs
+  function renderBadgeNextToPrice(container, matchedKeywords) {
+    const priceHeader = findPriceHeaderElement(container);
+    if (!priceHeader) return;
+
+    let badgeContainer = priceHeader.querySelector('.bybit-p2p-match-container');
+    if (!badgeContainer) {
+      badgeContainer = document.createElement('span');
+      badgeContainer.className = 'bybit-p2p-match-container';
+      priceHeader.appendChild(badgeContainer);
+    }
+
     const labelText = matchedKeywords.map(k => k.toUpperCase()).join(' • ');
-
-    // 1. If card is expanded: place badge right next to "Advertiser Terms" heading
-    if (expandedCard) {
-      let termsHeader = null;
-      const allHeadings = Array.from(expandedCard.querySelectorAll('h1, h2, h3, h4, div, span'));
-      for (const el of allHeadings) {
-        const text = (el.textContent || '').trim();
-        if (text === 'Advertiser Terms' || text === 'Условия рекламодателя' || text.startsWith('Advertiser Terms')) {
-          termsHeader = el;
-          break;
-        }
-      }
-
-      if (termsHeader) {
-        let badge = termsHeader.querySelector('.bybit-p2p-match-container');
-        if (!badge) {
-          badge = document.createElement('span');
-          badge.className = 'bybit-p2p-match-container';
-          termsHeader.appendChild(badge);
-        }
-        badge.innerHTML = `
-          <span class="bybit-p2p-match-tag">
-            <span class="bybit-tag-icon">⚡</span>
-            <span>${escapeHtml(labelText)}</span>
-          </span>
-        `;
-        return;
-      }
-    }
-
-    // 2. On the top row: place next to payment methods at the top
-    let targetCell = null;
-    for (const child of row.children) {
-      const text = child.textContent || '';
-      if (text.includes('Top-up') || text.includes('Transfer') || text.includes('Bank') || text.includes('Cash')) {
-        targetCell = child;
-        break;
-      }
-    }
-    if (!targetCell) {
-      targetCell = row.children[3] || row.children[0] || row;
-    }
-
-    let badge = targetCell.querySelector('.bybit-p2p-match-container');
-    if (!badge) {
-      badge = document.createElement('span');
-      badge.className = 'bybit-p2p-match-container';
-      targetCell.appendChild(badge);
-    }
-    badge.innerHTML = `
-      <span class="bybit-p2p-match-tag">
+    badgeContainer.innerHTML = `
+      <span class="bybit-p2p-match-tag" title="Найдено в условиях">
         <span class="bybit-tag-icon">⚡</span>
         <span>${escapeHtml(labelText)}</span>
       </span>
@@ -461,12 +407,6 @@
     });
     document.querySelectorAll('.bybit-p2p-highlighted-card').forEach(el => {
       el.classList.remove('bybit-p2p-highlighted-card');
-    });
-    document.querySelectorAll('.bybit-p2p-dimmed-order').forEach(el => {
-      el.classList.remove('bybit-p2p-dimmed-order');
-    });
-    document.querySelectorAll('.bybit-p2p-hidden-order').forEach(el => {
-      el.classList.remove('bybit-p2p-hidden-order');
     });
     document.querySelectorAll('.bybit-p2p-match-container').forEach(el => el.remove());
     document.querySelectorAll('.bybit-kw-highlight').forEach(el => {
@@ -492,49 +432,6 @@
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  // 8. Floating On-Page Quick Widget
-  function updateFloatingWidget(matched, total) {
-    if (!state.settings.enabled) {
-      const widget = document.getElementById('bybit-p2p-floating-widget');
-      if (widget) widget.style.display = 'none';
-      return;
-    }
-
-    let widget = document.getElementById('bybit-p2p-floating-widget');
-    if (!widget) {
-      widget = document.createElement('div');
-      widget.id = 'bybit-p2p-floating-widget';
-      document.body.appendChild(widget);
-    }
-
-    widget.style.display = 'flex';
-    const mainKw = (state.settings.keywords && state.settings.keywords[0]) || 'СБП';
-
-    widget.innerHTML = `
-      <span class="bybit-fw-badge">⚡</span>
-      <span class="bybit-fw-counter"><strong>${matched}</strong> / ${total} ${escapeHtml(mainKw)}</span>
-      <span class="bybit-fw-divider"></span>
-      <button class="bybit-fw-btn ${state.settings.dimNonMatching ? 'active' : ''}" id="bybit-fw-dim-toggle" title="Затемнить остальные заказы">👁️</button>
-      <button class="bybit-fw-btn ${state.settings.hideNonMatching ? 'active' : ''}" id="bybit-fw-filter-toggle" title="Показать только подходящие">🔍</button>
-    `;
-
-    const dimBtn = widget.querySelector('#bybit-fw-dim-toggle');
-    dimBtn.addEventListener('click', () => {
-      state.settings.dimNonMatching = !state.settings.dimNonMatching;
-      if (state.settings.dimNonMatching) state.settings.hideNonMatching = false;
-      api.storage.local.set({ dimNonMatching: state.settings.dimNonMatching, hideNonMatching: false });
-      scheduleHighlight(0);
-    });
-
-    const filterBtn = widget.querySelector('#bybit-fw-filter-toggle');
-    filterBtn.addEventListener('click', () => {
-      state.settings.hideNonMatching = !state.settings.hideNonMatching;
-      if (state.settings.hideNonMatching) state.settings.dimNonMatching = false;
-      api.storage.local.set({ hideNonMatching: state.settings.hideNonMatching, dimNonMatching: false });
-      scheduleHighlight(0);
-    });
-  }
-
   function scheduleHighlight(delay = 50) {
     if (state.highlightTimeout) {
       clearTimeout(state.highlightTimeout);
@@ -544,14 +441,14 @@
     }, delay);
   }
 
-  // 9. Dynamic Updates via MutationObserver & Routing
+  // 8. Mutation Observer & History routing
   function setupObserver() {
     const observer = new MutationObserver((mutations) => {
       let shouldUpdate = false;
       for (const m of mutations) {
         if (m.addedNodes.length > 0 || m.removedNodes.length > 0) {
           const target = m.target;
-          if (target && target.closest && (target.closest('#bybit-p2p-floating-widget') || target.closest('.bybit-p2p-match-container'))) {
+          if (target && target.closest && target.closest('.bybit-p2p-match-container')) {
             continue;
           }
           shouldUpdate = true;
@@ -566,10 +463,10 @@
     observer.observe(document.body, { childList: true, subtree: true });
 
     setInterval(() => {
-      if (state.settings.enabled && window.location.href.includes('otc')) {
+      if (state.settings.enabled && window.location.href.includes('p2p')) {
         highlightOrders();
       }
-    }, 2000);
+    }, 1500);
 
     window.addEventListener('popstate', () => scheduleHighlight(200));
     window.addEventListener('hashchange', () => scheduleHighlight(200));
@@ -578,7 +475,10 @@
   // Initialization
   function init() {
     loadSettings();
-    injectPageInterceptor();
+
+    // Clean up any lingering floating widget
+    const oldWidget = document.getElementById('bybit-p2p-floating-widget');
+    if (oldWidget) oldWidget.remove();
 
     if (document.body) {
       setupObserver();
@@ -590,7 +490,7 @@
       });
     }
 
-    console.log('[Bybit Highlighter] Extension initialized successfully');
+    console.log('[Bybit Highlighter] Extension active (v1.0.2)');
   }
 
   init();
