@@ -73,6 +73,21 @@ tr.bybit-p2p-highlighted-order > td {
   border-bottom-left-radius: 0 !important;
 }
 
+/* Seamless background for action button container in highlighted orders */
+.bybit-p2p-highlighted-order .fiat-p2p__action-button-inner,
+.bybit-p2p-highlighted-order .fiat-p2p__action-button,
+.bybit-p2p-highlighted-order [class*="action-button"],
+.bybit-p2p-highlighted-order [class*="action_button"],
+.bybit-p2p-highlighted-order td:last-child > div,
+.bybit-p2p-highlighted-card .fiat-p2p__action-button-inner,
+.bybit-p2p-highlighted-card .fiat-p2p__action-button,
+.bybit-p2p-highlighted-card [class*="action-button"],
+.bybit-p2p-highlighted-card [class*="action_button"],
+.bybit-p2p-highlighted-card td:last-child > div {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
 /* 2. Text Keyword Highlight (Green background + White text) */
 .bybit-kw-highlight {
   background-color: var(--bybit-hl-border) !important;
