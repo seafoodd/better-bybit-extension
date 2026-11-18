@@ -78,6 +78,76 @@ export default defineContentScript({
       document.documentElement.setAttribute('data-bybit-theme', color || 'emerald');
     }
 
+    // ==========================================
+    // Intercepted API Data Storage & Processing
+    // ==========================================
+    interface BybitOtcItem {
+      id: string;
+      nickName: string;
+      price: string;
+      minAmount: string;
+      maxAmount: string;
+      quantity: string;
+      remark: string;
+      payments: string[];
+    }
+
+    const interceptedItems = new Map<string, BybitOtcItem>();
+    const interceptedItemsByNickPrice = new Map<string, BybitOtcItem>();
+
+    function extractItems(jsonObj: any): any[] {
+      if (!jsonObj) return [];
+      if (Array.isArray(jsonObj)) return jsonObj;
+      if (jsonObj.result) {
+        if (Array.isArray(jsonObj.result)) return jsonObj.result;
+        if (Array.isArray(jsonObj.result.items)) return jsonObj.result.items;
+        if (Array.isArray(jsonObj.result.data)) return jsonObj.result.data;
+      }
+      if (jsonObj.data) {
+        if (Array.isArray(jsonObj.data)) return jsonObj.data;
+        if (Array.isArray(jsonObj.data.items)) return jsonObj.data.items;
+      }
+      if (Array.isArray(jsonObj.items)) return jsonObj.items;
+      return [];
+    }
+
+    function processInterceptedData(rawText: string) {
+      try {
+        const data = typeof rawText === 'string' ? JSON.parse(rawText) : rawText;
+        const items = extractItems(data);
+        if (!items || items.length === 0) return;
+
+        items.forEach((item: any) => {
+          if (!item || !item.nickName) return;
+          const nick = String(item.nickName).trim();
+          const price = item.price ? String(item.price).trim() : '';
+          const cleanNick = nick.toLowerCase();
+          const numPrice = parseFloat(price);
+          const priceKey = !isNaN(numPrice) ? numPrice.toFixed(2) : price;
+
+          const otcItem: BybitOtcItem = {
+            id: String(item.id || ''),
+            nickName: nick,
+            price: price,
+            minAmount: String(item.minAmount || ''),
+            maxAmount: String(item.maxAmount || ''),
+            quantity: String(item.quantity || ''),
+            remark: String(item.remark || ''),
+            payments: Array.isArray(item.payments) ? item.payments : []
+          };
+
+          interceptedItems.set(cleanNick, otcItem);
+          if (priceKey) {
+            interceptedItemsByNickPrice.set(`${cleanNick}_${priceKey}`, otcItem);
+          }
+        });
+
+        scheduleHighlight(20);
+      } catch (e) {
+        console.warn('[Bybit P2P] Failed to process intercepted data:', e);
+      }
+    }
+
     // 2. Strict USDT/RUB Buy Page Detection (Blocks sell page and non-USDT/RUB pairs)
     function isStrictUsdtRubBuyPage(card?: HTMLElement): boolean {
       const href = window.location.href.toLowerCase();
@@ -639,7 +709,103 @@ export default defineContentScript({
       return candidates[0];
     }
 
-    // 8. Core Highlight & Processing Loop
+    // 8. Table Row & Carousel Card Highlighting
+    function renderTableRowBadge(element: HTMLElement, priceEl: HTMLElement, matchedKeywords: string[], remark: string) {
+      const targetParent = priceEl.parentElement || priceEl;
+
+      // Remove existing badges in other positions of this card
+      element.querySelectorAll('.bybit-p2p-match-container').forEach(b => {
+        if (b.parentElement !== targetParent) b.remove();
+      });
+
+      let badge = targetParent.querySelector<HTMLElement>('.bybit-p2p-match-container');
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'bybit-p2p-match-container';
+        if (priceEl.nextSibling) {
+          targetParent.insertBefore(badge, priceEl.nextSibling);
+        } else {
+          targetParent.appendChild(badge);
+        }
+      }
+
+      const labelText = matchedKeywords.map(k => k.toUpperCase()).join(' • ');
+      const tooltipText = remark ? `⚡ Найдено в условиях: ${labelText}\n\nУсловия мерчанта:\n${remark}` : `⚡ Найдено в условиях: ${labelText}`;
+
+      badge.innerHTML = `
+        <span class="bybit-p2p-match-tag" title="${escapeHtml(tooltipText)}">
+          <span class="bybit-tag-icon">⚡</span>
+          <span>${escapeHtml(labelText)}</span>
+        </span>
+      `;
+    }
+
+    function highlightTableOrders(keywords: string[]) {
+      // 1. Regular order rows in table
+      const rows = Array.from(document.querySelectorAll<HTMLElement>(
+        '.trade-table__tbody > tr, tr[data-guide*="ad-listing"], tbody tr, .trade-list__row'
+      ));
+
+      const validRows = rows.filter(tr => {
+        if (tr.classList.contains('new-user-ads-carousel-row')) return false;
+        if (tr.textContent?.includes('Advertiser Terms') || tr.textContent?.includes('Условия рекламодателя')) return false;
+        return tr.querySelector('.advertiser-name') && tr.querySelector('.price-amount');
+      });
+
+      // 2. Carousel cards
+      const carouselCards = Array.from(document.querySelectorAll<HTMLElement>('.new-user-ads-carousel-card')).filter(card => {
+        return card.querySelector('.advertiser-name') && card.querySelector('.price-amount');
+      });
+
+      const allOrderElements: HTMLElement[] = [...validRows, ...carouselCards];
+
+      allOrderElements.forEach(element => {
+        const nameEl = element.querySelector<HTMLElement>('.advertiser-name');
+        const priceEl = element.querySelector<HTMLElement>('.price-amount');
+        if (!nameEl || !priceEl) return;
+
+        const rawName = (nameEl.innerText || nameEl.textContent || '').trim();
+        const cleanName = rawName.toLowerCase();
+
+        let priceKey = '';
+        const pText = (priceEl.innerText || priceEl.textContent || '').replace(/[^\d.]/g, '');
+        const pNum = parseFloat(pText);
+        if (!isNaN(pNum)) {
+          priceKey = pNum.toFixed(2);
+        }
+
+        // Match with intercepted API data
+        let matchedItem = priceKey ? interceptedItemsByNickPrice.get(`${cleanName}_${priceKey}`) : undefined;
+        if (!matchedItem) {
+          matchedItem = interceptedItems.get(cleanName);
+        }
+
+        let matchedKeywords: string[] = [];
+        let remark = '';
+
+        if (matchedItem) {
+          remark = matchedItem.remark || '';
+          const textToSearch = `${remark} ${matchedItem.nickName || ''}`;
+          matchedKeywords = findMatchesInText(textToSearch, keywords);
+        }
+
+        // Fallback: check DOM text
+        if (matchedKeywords.length === 0) {
+          const domText = element.textContent || '';
+          matchedKeywords = findMatchesInText(domText, keywords);
+        }
+
+        if (matchedKeywords.length > 0) {
+          element.classList.add('bybit-p2p-highlighted-order');
+          renderTableRowBadge(element, priceEl, matchedKeywords, remark);
+        } else {
+          element.classList.remove('bybit-p2p-highlighted-order');
+          element.querySelectorAll('.bybit-p2p-match-container').forEach(el => el.remove());
+        }
+      });
+    }
+
+    // 9. Core Highlight & Processing Loop
     function highlightOrders() {
       const oldWidget = document.getElementById('bybit-p2p-floating-widget');
       if (oldWidget) oldWidget.remove();
@@ -650,19 +816,23 @@ export default defineContentScript({
       }
 
       const keywords = getActiveKeywords();
-      const openOrders = findOpenOrderContainers();
 
+      // 1. Highlight all table orders and carousel cards immediately from intercepted data
+      highlightTableOrders(keywords);
+
+      // 2. Process open/expanded order containers
+      const openOrders = findOpenOrderContainers();
       openOrders.forEach(card => {
-        // 1. Payment Auto-Selection (Strictly USDT/RUB Buy page, only if seller offers target methods)
+        // Payment Auto-Selection (Strictly USDT/RUB Buy page, only if seller offers target methods)
         autoSelectPaymentMethod(card);
 
-        // 2. Expose the "ALL" button prominently
+        // Expose the "ALL" button prominently
         exposeAllButton(card);
 
-        // 3. Highlight keywords and 3+ digit numbers in description
+        // Highlight keywords and 3+ digit numbers in description
         highlightKeywordsAndNumbers(card, keywords);
 
-        // 4. Render badge next to Price if keywords matched
+        // Render badge next to Price in expanded card
         const text = card.textContent || '';
         const matched = findMatchesInText(text, keywords);
         const isMatch = matched.length > 0;
@@ -792,6 +962,25 @@ export default defineContentScript({
 
       const oldWidget = document.getElementById('bybit-p2p-floating-widget');
       if (oldWidget) oldWidget.remove();
+
+      // Listen for intercepted network data
+      window.addEventListener('message', (event) => {
+        if (event.source !== window || !event.data || event.data.type !== '__BYBIT_P2P_DATA__') {
+          return;
+        }
+        processInterceptedData(event.data.text);
+      });
+
+      window.addEventListener('__BYBIT_P2P_DATA_EVENT__', (event: any) => {
+        if (event.detail && event.detail.text) {
+          processInterceptedData(event.detail.text);
+        }
+      });
+
+      // Request cached network data from MAIN world script
+      try {
+        window.dispatchEvent(new CustomEvent('__BYBIT_REQUEST_LAST_DATA__'));
+      } catch (e) {}
 
       if (document.body) {
         setupObserver();

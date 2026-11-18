@@ -17,6 +17,7 @@ export default defineContentScript({
       '/fiat/otc/item/online',
       '/fiat/otc/item/',
       '/fiat/otc/',
+      '/otc/item/online',
       '/otc/item/',
       'online'
     ];
@@ -52,6 +53,15 @@ export default defineContentScript({
           return;
         }
 
+        // 1. Cache latest data on window
+        (window as any).__BYBIT_P2P_LAST_DATA__ = text;
+
+        // 2. Dispatch custom event for content script
+        window.dispatchEvent(new CustomEvent('__BYBIT_P2P_DATA_EVENT__', {
+          detail: { text, url }
+        }));
+
+        // 3. PostMessage across worlds
         window.postMessage({
           type: '__BYBIT_P2P_DATA__',
           text: text,
@@ -61,6 +71,14 @@ export default defineContentScript({
         console.warn('[Bybit P2P Highlighter] broadcast error:', e);
       }
     }
+
+    window.addEventListener('__BYBIT_REQUEST_LAST_DATA__', () => {
+      const last = (window as any).__BYBIT_P2P_LAST_DATA__;
+      if (last) {
+        window.dispatchEvent(new CustomEvent('__BYBIT_P2P_DATA_EVENT__', { detail: { text: last, url: 'cache' } }));
+        window.postMessage({ type: '__BYBIT_P2P_DATA__', text: last, url: 'cache' }, '*');
+      }
+    });
 
     if (typeof window.fetch === 'function') {
       const originalFetch = window.fetch;

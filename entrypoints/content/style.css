@@ -38,6 +38,14 @@
   transition: border-color 0.2s ease, background-color 0.2s ease !important;
 }
 
+tr.bybit-p2p-highlighted-order > td:first-child {
+  border-left: 4px solid var(--bybit-hl-border) !important;
+}
+
+tr.bybit-p2p-highlighted-order > td {
+  background-color: var(--bybit-hl-bg) !important;
+}
+
 .bybit-p2p-highlighted-card {
   border-left: 4px solid var(--bybit-hl-border) !important;
   border-top-left-radius: 0 !important;
