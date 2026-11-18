@@ -78,17 +78,73 @@ export default defineContentScript({
       document.documentElement.setAttribute('data-bybit-theme', color || 'emerald');
     }
 
-    // 2. Strict USDT/RUB Page Detection
-    function isUsdtRubBuyPage(): boolean {
+    // 2. Strict USDT/RUB Buy Page Detection (Blocks sell page and non-USDT/RUB pairs)
+    function isStrictUsdtRubBuyPage(card?: HTMLElement): boolean {
       const href = window.location.href.toLowerCase();
-      if (href.includes('usdt') && href.includes('rub')) {
-        return true;
+
+      // Strictly reject sell URLs and sell parameters
+      if (href.includes('/sell') || href.includes('side=1') || href.includes('side=sell') || href.includes('actiontype=0')) {
+        return false;
       }
-      const body = document.body ? document.body.innerText : '';
-      if (body.includes('RUB') && body.includes('USDT')) {
-        return true;
+
+      // Check card action button
+      if (card) {
+        const cardText = card.textContent || '';
+        if (cardText.includes('Sell USDT') || cardText.includes('Продать USDT')) {
+          return false;
+        }
+        const mainBtn = card.querySelector('button.moly-btn, button[class*="btn"]');
+        const mainBtnText = (mainBtn?.textContent || '').trim().toLowerCase();
+        if (mainBtnText === 'sell' || mainBtnText === 'продать') {
+          return false;
+        }
       }
-      return false;
+
+      // Must be Buy
+      const isBuy = href.includes('/buy') || href.includes('side=0') || href.includes('side=buy') || href.includes('actiontype=1');
+      if (!isBuy) {
+        return false;
+      }
+
+      // Must be USDT and RUB
+      const isUsdt = href.includes('/usdt') || href.includes('token=usdt') || href.includes('coin=usdt');
+      const isRub = href.includes('/rub') || href.includes('fiat=rub') || href.includes('currency=rub');
+
+      return Boolean(isUsdt && isRub);
+    }
+
+    // Check if the seller offers Mobile Top-up or Bank Transfer
+    function orderOffersTargetPaymentMethods(container: HTMLElement): boolean {
+      // 1. If rc-select dropdown is already open in DOM, check its options
+      const dropdown = document.querySelector<HTMLElement>('.fiat-p2p__payment-select-dropdown, .rc-select-dropdown');
+      if (dropdown) {
+        const ddText = dropdown.textContent || '';
+        if (ddText.includes('Mobile Top-up') || ddText.includes('Bank Transfer')) {
+          return true;
+        }
+      }
+
+      // 2. Check the container and parent / sibling table rows
+      let textToCheck = container.textContent || '';
+      if (container.previousElementSibling) {
+        textToCheck += ' ' + (container.previousElementSibling.textContent || '');
+      }
+
+      const cardTr = container.closest('tr');
+      if (cardTr) {
+        textToCheck += ' ' + (cardTr.textContent || '');
+        if (cardTr.previousElementSibling) {
+          textToCheck += ' ' + (cardTr.previousElementSibling.textContent || '');
+        }
+      }
+
+      // 3. Check any visible payment tags in the DOM
+      const tags = document.querySelectorAll('.payment-tags-container, [class*="payment-tag"], [class*="trade-list-tag"]');
+      tags.forEach(tag => {
+        textToCheck += ' ' + (tag.textContent || '');
+      });
+
+      return textToCheck.includes('Mobile Top-up') || textToCheck.includes('Bank Transfer');
     }
 
     // 3. User Simulation Click
@@ -150,7 +206,12 @@ export default defineContentScript({
 
     // 4. Single-Shot Auto-Select Payment Method
     function autoSelectPaymentMethod(container: HTMLElement) {
-      if (!isUsdtRubBuyPage()) return;
+      if (!isStrictUsdtRubBuyPage(container)) return;
+
+      // CRITICAL: Only proceed if seller offers Mobile Top-up or Bank Transfer. If not, do NOT even try!
+      if (!orderOffersTargetPaymentMethods(container)) {
+        return;
+      }
 
       try {
         window.dispatchEvent(new CustomEvent('__BYBIT_SELECT_PAYMENT__'));
@@ -275,7 +336,129 @@ export default defineContentScript({
       return target.closest<HTMLElement>('.fiat-p2p__payment-select-comp, div[tabindex], div[class*="select"], button') || target;
     }
 
-    // 5. Keyword Matching
+    // 5. Price / Amount Input & "ALL" Button Handling
+    function cleanNumberString(val: string): string {
+      let clean = val.replace(/[\s\u00a0]/g, '');
+      if (clean.includes(',') && clean.includes('.')) {
+        clean = clean.replace(/,/g, '');
+      } else if (clean.includes(',')) {
+        if (/,\d{2}$/.test(clean)) {
+          clean = clean.replace(',', '.');
+        } else {
+          clean = clean.replace(/,/g, '');
+        }
+      }
+      return clean;
+    }
+
+    function findPayAmountInput(container: HTMLElement): HTMLInputElement | null {
+      // 1. Search under "I will pay" / "Я заплачу" label
+      const allLabels = Array.from(container.querySelectorAll<HTMLElement>('*'));
+      for (const el of allLabels) {
+        const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+        if (t === 'i will pay' || t === 'я заплачу' || t.startsWith('i will pay')) {
+          const fieldWrapper = el.closest('div[class*="item"], div[class*="field"], div[class*="row"]') || el.parentElement;
+          if (fieldWrapper) {
+            const input = fieldWrapper.querySelector<HTMLInputElement>('input');
+            if (input) return input;
+          }
+          if (el.nextElementSibling) {
+            const input = el.nextElementSibling.querySelector<HTMLInputElement>('input');
+            if (input) return input;
+          }
+        }
+      }
+
+      // 2. Search for input with placeholder containing ~ (which is the amount limits)
+      const inputsWithTilde = Array.from(container.querySelectorAll<HTMLInputElement>('input')).find(input => (input.placeholder || '').includes('~'));
+      if (inputsWithTilde) return inputsWithTilde;
+
+      // 3. First text/number input in the container
+      const inputs = Array.from(container.querySelectorAll<HTMLInputElement>('input:not([type="checkbox"]):not([type="radio"])'));
+      return inputs[0] || null;
+    }
+
+    function insertPriceValue(container: HTMLElement, value: string) {
+      const payInput = findPayAmountInput(container);
+      if (!payInput) return;
+
+      payInput.focus();
+
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value'
+      )?.set;
+
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(payInput, value);
+      } else {
+        payInput.value = value;
+      }
+
+      payInput.dispatchEvent(new Event('input', { bubbles: true }));
+      payInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+      payInput.classList.add('bybit-input-flashed');
+      setTimeout(() => {
+        payInput.classList.remove('bybit-input-flashed');
+      }, 350);
+    }
+
+    // Expose the "All" button prominently to the right of the price input
+    function exposeAllButton(container: HTMLElement) {
+      const payInput = findPayAmountInput(container);
+      if (!payInput) return;
+
+      // Find the input container (moly-input or input wrapper)
+      const inputWrapper = payInput.closest<HTMLElement>('.moly-input, [class*="input"], div.relative') || payInput.parentElement;
+      if (!inputWrapper || !inputWrapper.parentElement) return;
+
+      // Check if already has externalAllBtn
+      let rowWrapper = inputWrapper.parentElement;
+      let externalAllBtn = rowWrapper.querySelector<HTMLButtonElement>('.bybit-prominent-all-btn');
+
+      if (!externalAllBtn) {
+        if (!rowWrapper.classList.contains('bybit-all-input-row')) {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'bybit-all-input-row';
+          inputWrapper.parentNode?.insertBefore(wrapper, inputWrapper);
+          wrapper.appendChild(inputWrapper);
+          rowWrapper = wrapper;
+        }
+
+        externalAllBtn = document.createElement('button');
+        externalAllBtn.type = 'button';
+        externalAllBtn.className = 'bybit-prominent-all-btn';
+        externalAllBtn.textContent = 'ALL';
+        externalAllBtn.title = 'Ввести максимальную сумму (All)';
+
+        externalAllBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          // 1. Native All button click if found
+          const allCandidates = Array.from(inputWrapper.querySelectorAll<HTMLElement>('*'));
+          const nativeAllBtn = allCandidates.find(el => {
+            const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+            return t === 'all' || t === 'все' || t === 'max';
+          });
+          if (nativeAllBtn) {
+            simulateUserClick(nativeAllBtn);
+          }
+
+          // 2. Also extract max value from placeholder (e.g. "1,813.00 ~ 1,813.00")
+          const placeholder = payInput.placeholder || '';
+          const maxMatch = placeholder.match(/~\s*([\d\s,.]+)/) || placeholder.match(/([\d\s,.]+)\s*$/);
+          if (maxMatch && maxMatch[1]) {
+            insertPriceValue(container, cleanNumberString(maxMatch[1]));
+          }
+        });
+
+        rowWrapper.appendChild(externalAllBtn);
+      }
+    }
+
+    // 6. Keyword & 3+ Digit Number Highlighting
     function getActiveKeywords(): string[] {
       if (!state.settings.keywords || !Array.isArray(state.settings.keywords)) {
         return ['сбп', 'телефона'];
@@ -297,20 +480,43 @@ export default defineContentScript({
       return matched;
     }
 
-    // 6. Highlight Keywords in Text Nodes
-    function highlightKeywordsInTextNodes(container: HTMLElement, keywords: string[]) {
-      if (!container || !keywords || keywords.length === 0) return;
+    function findDescriptionContainer(card: HTMLElement): HTMLElement | null {
+      const candidates = Array.from(card.querySelectorAll<HTMLElement>('*'));
+      for (const el of candidates) {
+        const t = (el.innerText || el.textContent || '').trim();
+        if (t === 'Advertiser Terms' || t === 'Условия рекламодателя') {
+          return el.closest('div[class*="terms"], div[class*="left"], div[class*="content"]') || el.parentElement;
+        }
+      }
+      return card.querySelector<HTMLElement>('.left-content, [class*="terms"], [class*="advertiser"]');
+    }
+
+    function highlightKeywordsAndNumbers(container: HTMLElement, keywords: string[]) {
+      if (!container) return;
 
       const escapedKws = keywords.map(escapeRegExp).filter(Boolean);
-      if (escapedKws.length === 0) return;
-      const regex = new RegExp(`(${escapedKws.join('|')})`, 'gi');
+      const kwPattern = escapedKws.length > 0 ? escapedKws.join('|') : null;
+      // Match numbers with at least 3 digits (supports 24143, 16,200.00, 3 000, etc.)
+      const numPattern = '(?<!\\d)(?:\\d{1,3}(?:[ ,.\\u00a0]\\d{3})+(?:[.,]\\d+)?|\\d{3,}(?:[.,]\\d+)?)(?!\\d)';
+
+      let fullRegex: RegExp;
+      if (kwPattern) {
+        fullRegex = new RegExp(`(${kwPattern})|(${numPattern})`, 'gi');
+      } else {
+        fullRegex = new RegExp(`()|(${numPattern})`, 'gi');
+      }
+
+      // Restrict text highlighting to the Advertiser Terms / Description
+      const descContainer = findDescriptionContainer(container) || container;
 
       const walker = document.createTreeWalker(
-        container,
+        descContainer,
         NodeFilter.SHOW_TEXT,
         {
           acceptNode(node) {
-            if (!node.nodeValue || !regex.test(node.nodeValue)) {
+            if (!node.nodeValue) return NodeFilter.FILTER_REJECT;
+            fullRegex.lastIndex = 0;
+            if (!fullRegex.test(node.nodeValue)) {
               return NodeFilter.FILTER_REJECT;
             }
             const parent = node.parentElement;
@@ -319,7 +525,10 @@ export default defineContentScript({
             if (['script', 'style', 'input', 'textarea', 'button', 'mark'].includes(tag)) {
               return NodeFilter.FILTER_REJECT;
             }
-            if (parent.closest('.bybit-p2p-match-container')) {
+            if (parent.closest('.bybit-p2p-match-container') || parent.closest('.bybit-prominent-all-btn')) {
+              return NodeFilter.FILTER_REJECT;
+            }
+            if (parent.closest('[data-guide="payment-method"]') || parent.closest('.right-action')) {
               return NodeFilter.FILTER_REJECT;
             }
             return NodeFilter.FILTER_ACCEPT;
@@ -336,22 +545,51 @@ export default defineContentScript({
         const parent = node.parentElement;
         if (!parent) return;
         const text = node.nodeValue || '';
-        regex.lastIndex = 0;
-        if (!regex.test(text)) return;
+        fullRegex.lastIndex = 0;
+        if (!fullRegex.test(text)) return;
 
         const frag = document.createDocumentFragment();
         let lastIdx = 0;
-        text.replace(regex, (match, p1, offset) => {
+
+        fullRegex.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = fullRegex.exec(text)) !== null) {
+          const matchStr = match[0];
+          const offset = match.index;
+          const isKw = Boolean(match[1]);
+          const isNum = Boolean(match[2]);
+
           if (offset > lastIdx) {
             frag.appendChild(document.createTextNode(text.slice(lastIdx, offset)));
           }
-          const mark = document.createElement('mark');
-          mark.className = 'bybit-kw-highlight';
-          mark.textContent = match;
-          frag.appendChild(mark);
-          lastIdx = offset + match.length;
-          return match;
-        });
+
+          if (isKw) {
+            // Keyword: Green background, white text
+            const mark = document.createElement('mark');
+            mark.className = 'bybit-kw-highlight';
+            mark.textContent = matchStr;
+            frag.appendChild(mark);
+          } else if (isNum) {
+            // Number (3+ digits): Gray background, clickable to insert into price field
+            const numMark = document.createElement('mark');
+            numMark.className = 'bybit-number-highlight';
+            numMark.textContent = matchStr;
+            const cleanVal = cleanNumberString(matchStr);
+            numMark.dataset.number = cleanVal;
+            numMark.title = `Нажмите, чтобы ввести ${cleanVal} в поле цены`;
+
+            numMark.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              insertPriceValue(container, cleanVal);
+            });
+
+            frag.appendChild(numMark);
+          }
+
+          lastIdx = offset + matchStr.length;
+        }
+
         if (lastIdx < text.length) {
           frag.appendChild(document.createTextNode(text.slice(lastIdx)));
         }
@@ -360,7 +598,7 @@ export default defineContentScript({
       });
     }
 
-    // 7. Find Open Expanded Order Container
+    // 7. Find Open Expanded Order Containers
     function findOpenOrderContainers(): HTMLElement[] {
       const candidates = Array.from(document.querySelectorAll<HTMLElement>('tr, div')).filter(el => {
         const text = el.textContent || '';
@@ -401,7 +639,7 @@ export default defineContentScript({
       return candidates[0];
     }
 
-    // 8. Core Highlight & Auto-Select Execution
+    // 8. Core Highlight & Processing Loop
     function highlightOrders() {
       const oldWidget = document.getElementById('bybit-p2p-floating-widget');
       if (oldWidget) oldWidget.remove();
@@ -415,8 +653,16 @@ export default defineContentScript({
       const openOrders = findOpenOrderContainers();
 
       openOrders.forEach(card => {
+        // 1. Payment Auto-Selection (Strictly USDT/RUB Buy page, only if seller offers target methods)
         autoSelectPaymentMethod(card);
 
+        // 2. Expose the "ALL" button prominently
+        exposeAllButton(card);
+
+        // 3. Highlight keywords and 3+ digit numbers in description
+        highlightKeywordsAndNumbers(card, keywords);
+
+        // 4. Render badge next to Price if keywords matched
         const text = card.textContent || '';
         const matched = findMatchesInText(text, keywords);
         const isMatch = matched.length > 0;
@@ -424,8 +670,6 @@ export default defineContentScript({
         if (isMatch) {
           card.classList.add('bybit-p2p-highlighted-card');
           card.classList.add('bybit-p2p-highlighted-order');
-
-          highlightKeywordsInTextNodes(card, keywords);
           renderBadgeNextToPrice(card, matched);
         } else {
           card.classList.remove('bybit-p2p-highlighted-card');
@@ -471,13 +715,14 @@ export default defineContentScript({
         el.classList.remove('bybit-p2p-highlighted-card');
       });
       document.querySelectorAll('.bybit-p2p-match-container').forEach(el => el.remove());
-      document.querySelectorAll('.bybit-kw-highlight').forEach(el => {
+      document.querySelectorAll('.bybit-kw-highlight, .bybit-number-highlight').forEach(el => {
         const parent = el.parentNode;
         if (parent) {
           parent.replaceChild(document.createTextNode(el.textContent || ''), el);
           parent.normalize();
         }
       });
+      document.querySelectorAll('.bybit-prominent-all-btn').forEach(el => el.remove());
     }
 
     function escapeHtml(str: string): string {
@@ -511,8 +756,12 @@ export default defineContentScript({
             for (const node of Array.from(m.addedNodes)) {
               if (node.nodeType === 1) {
                 const el = node as HTMLElement;
-                if (el.classList && el.classList.contains('bybit-kw-highlight')) continue;
-                if (el.classList && el.classList.contains('bybit-p2p-match-container')) continue;
+                if (el.classList && (
+                  el.classList.contains('bybit-kw-highlight') ||
+                  el.classList.contains('bybit-number-highlight') ||
+                  el.classList.contains('bybit-p2p-match-container') ||
+                  el.classList.contains('bybit-prominent-all-btn')
+                )) continue;
                 shouldUpdate = true;
                 break;
               }
@@ -554,7 +803,7 @@ export default defineContentScript({
         });
       }
 
-      console.log('[Bybit Highlighter] WXT Extension active (v1.0.9)');
+      console.log('[Bybit Highlighter] WXT Extension active (v1.1.0)');
     }
 
     init();

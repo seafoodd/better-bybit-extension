@@ -118,3 +118,87 @@ body.bybit-suppress-dropdown [data-guide="payment-method"] > div:nth-child(2) {
   transition: none !important;
   animation: none !important;
 }
+
+/* 5. Number Highlight in Order Description (Gray background, white text, clickable) */
+.bybit-number-highlight {
+  background-color: #475569 !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  font-family: inherit !important;
+  padding: 1px 6px !important;
+  margin: 0 2px !important;
+  border-radius: 4px !important;
+  display: inline-block !important;
+  line-height: 1.3 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25) !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  transition: all 0.15s ease !important;
+  vertical-align: baseline !important;
+}
+
+.bybit-number-highlight:hover {
+  background-color: #64748b !important;
+  transform: translateY(-1px) scale(1.03) !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35) !important;
+}
+
+.bybit-number-highlight:active {
+  transform: translateY(0) scale(0.98) !important;
+  background-color: #334155 !important;
+}
+
+/* 6. Prominent "ALL" Button next to Price Input */
+.bybit-all-input-row,
+.bybit-all-btn-wrapper {
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  gap: 8px !important;
+}
+
+.bybit-all-input-row > *:first-child,
+.bybit-all-btn-wrapper > *:first-child {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+.bybit-prominent-all-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 16px !important;
+  height: 48px !important;
+  border-radius: 8px !important;
+  border: 1px solid #10b981 !important;
+  background: rgba(16, 185, 129, 0.12) !important;
+  color: #10b981 !important;
+  font-family: inherit !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  transition: all 0.15s ease !important;
+  flex-shrink: 0 !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15) !important;
+}
+
+.bybit-prominent-all-btn:hover {
+  background: #10b981 !important;
+  color: #ffffff !important;
+  border-color: #10b981 !important;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4) !important;
+  transform: translateY(-1px) !important;
+}
+
+.bybit-prominent-all-btn:active {
+  transform: translateY(0) !important;
+  background: #059669 !important;
+}
+
+.bybit-input-flashed {
+  outline: 2px solid #10b981 !important;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.5) !important;
+  transition: all 0.25s ease !important;
+}

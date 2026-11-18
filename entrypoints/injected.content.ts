@@ -126,43 +126,99 @@ export default defineContentScript({
     // ==========================================
     const attemptedTriggers = new WeakSet();
 
-    function isUsdtRubBuyPage(): boolean {
+    function isStrictUsdtRubBuyPage(): boolean {
       const href = window.location.href.toLowerCase();
-      const isSell = href.includes('/sell') || href.includes('side=1');
-      if (isSell) return false;
 
-      if (href.includes('usdt') && href.includes('rub')) {
-        return true;
+      // Strictly reject sell URLs and sell parameters
+      if (href.includes('/sell') || href.includes('side=1') || href.includes('side=sell') || href.includes('actiontype=0')) {
+        return false;
       }
 
-      if (href.includes('p2p') || href.includes('fiat/trade/otc')) {
-        const text = document.body ? document.body.innerText : '';
-        return (text.includes('RUB') || href.includes('rub')) && (text.includes('USDT') || href.includes('usdt'));
+      // Check if any visible primary action button is "Sell"
+      const sellBtn = document.querySelector('button[class*="sell"], .p2p-order__btn--sell');
+      if (sellBtn && (sellBtn.textContent || '').toLowerCase().includes('sell')) {
+        return false;
       }
 
-      return false;
+      // Must be Buy
+      const isBuy = href.includes('/buy') || href.includes('side=0') || href.includes('side=buy') || href.includes('actiontype=1');
+      if (!isBuy) {
+        return false;
+      }
+
+      // Must be USDT and RUB
+      const isUsdt = href.includes('/usdt') || href.includes('token=usdt') || href.includes('coin=usdt');
+      const isRub = href.includes('/rub') || href.includes('fiat=rub') || href.includes('currency=rub');
+
+      return Boolean(isUsdt && isRub);
+    }
+
+    // Check if the current order's seller offers Mobile Top-up or Bank Transfer
+    function orderOffersTargetPaymentMethods(trigger: HTMLElement): boolean {
+      // 1. If rc-select dropdown is already open in DOM, check its options
+      const dropdown = document.querySelector<HTMLElement>('.fiat-p2p__payment-select-dropdown, .rc-select-dropdown');
+      if (dropdown) {
+        const ddText = dropdown.textContent || '';
+        if (ddText.includes('Mobile Top-up') || ddText.includes('Bank Transfer')) {
+          return true;
+        }
+      }
+
+      // 2. Check the trigger's order container and sibling/parent rows
+      let textToCheck = trigger.textContent || '';
+      let el: HTMLElement | null = trigger;
+      while (el && el !== document.body) {
+        textToCheck += ' ' + (el.textContent || '');
+        if (el.tagName === 'TR' || el.classList.contains('p2p-order-item') || el.classList.contains('trade-list__row')) {
+          if (el.previousElementSibling) {
+            textToCheck += ' ' + (el.previousElementSibling.textContent || '');
+          }
+          break;
+        }
+        el = el.parentElement;
+      }
+
+      // 3. Check visible payment tags in DOM
+      const tags = document.querySelectorAll('.payment-tags-container, [class*="payment-tag"], [class*="trade-list-tag"]');
+      tags.forEach(tag => {
+        textToCheck += ' ' + (tag.textContent || '');
+      });
+
+      return textToCheck.includes('Mobile Top-up') || textToCheck.includes('Bank Transfer');
     }
 
     function triggerElementEvents(element: HTMLElement) {
       if (!element) return;
 
       // 1. Invoke React props and React Fiber memoizedProps
+      const nativeEvt = new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window
+      });
+
       let curr: HTMLElement | null = element;
       let depth = 0;
-      while (curr && depth < 5) {
+      while (curr && depth < 3) {
         const obj = curr as any;
         for (const k in obj) {
           if (k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$')) {
             const props = obj[k];
             if (props) {
               const fakeEvent = {
+                nativeEvent: nativeEvt,
                 bubbles: true,
                 cancelable: true,
                 composed: true,
                 target: element,
                 currentTarget: curr,
+                defaultPrevented: false,
+                isDefaultPrevented: () => false,
+                isPropagationStopped: () => false,
                 preventDefault() {},
-                stopPropagation() {}
+                stopPropagation() {},
+                persist() {}
               };
               if (typeof props.onClick === 'function') {
                 try { props.onClick(fakeEvent); } catch (e) {}
@@ -180,13 +236,18 @@ export default defineContentScript({
             if (fiber && fiber.memoizedProps) {
               const mp = fiber.memoizedProps;
               const fakeEvent = {
+                nativeEvent: nativeEvt,
                 bubbles: true,
                 cancelable: true,
                 composed: true,
                 target: element,
                 currentTarget: curr,
+                defaultPrevented: false,
+                isDefaultPrevented: () => false,
+                isPropagationStopped: () => false,
                 preventDefault() {},
-                stopPropagation() {}
+                stopPropagation() {},
+                persist() {}
               };
               if (typeof mp.onClick === 'function') {
                 try { mp.onClick(fakeEvent); } catch (e) {}
@@ -285,12 +346,17 @@ export default defineContentScript({
     }
 
     function handlePaymentAutoSelection() {
-      if (!isUsdtRubBuyPage()) return;
+      if (!isStrictUsdtRubBuyPage()) return;
 
       const trigger = document.querySelector<HTMLElement>('.fiat-p2p__payment-select-comp--unselected') ||
                       document.querySelector<HTMLElement>('[data-guide="payment-method"] .fiat-p2p__payment-select-comp');
 
       if (!trigger) return;
+
+      // CRITICAL: Only proceed if this seller offers Mobile Top-up or Bank Transfer. If not, do NOT even attempt!
+      if (!orderOffersTargetPaymentMethods(trigger)) {
+        return;
+      }
 
       const currentText = (trigger.innerText || trigger.textContent || '').trim();
       if (currentText.includes('Mobile Top-up') || currentText.includes('Bank Transfer')) {
