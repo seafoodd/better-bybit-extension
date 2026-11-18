@@ -1,6 +1,7 @@
 /**
  * Bybit P2P Order Highlighter - Content Script
- * Receives intercepted Bybit P2P responses and highlights orders matching keywords (СБП, телефона).
+ * Highlights keywords in Bybit P2P orders (СБП, телефона) with green background & white text,
+ * positions the badge at the top, and renders a clean, solid green left stripe.
  */
 (() => {
   'use strict';
@@ -13,8 +14,7 @@
     settings: {
       enabled: true,
       keywords: ['СБП', 'телефона'],
-      highlightColor: 'emerald', // emerald, amber, cyan, violet
-      showRemarkPreview: true,
+      highlightColor: 'emerald',
       dimNonMatching: false,
       hideNonMatching: false
     },
@@ -22,7 +22,6 @@
     itemsByKey: new Map(),
     itemsByNick: new Map(),
     itemsByUserId: new Map(),
-    lastItemIds: [],
     matchedCount: 0,
     totalRowsCount: 0,
     highlightTimeout: null
@@ -99,7 +98,6 @@
       (document.head || document.documentElement).appendChild(script);
     } catch (e) {}
 
-    // Listen for data dispatched by injected.js
     window.addEventListener('message', (event) => {
       if (event.source !== window) return;
       if (event.data && event.data.type === '__BYBIT_P2P_DATA__' && event.data.text) {
@@ -127,19 +125,10 @@
 
       if (!items || items.length === 0) return;
 
-      console.log(`[Bybit Highlighter] Cached ${items.length} P2P items from API`);
-
-      const newIds = [];
       items.forEach(item => {
         if (!item) return;
-        if (item.id) {
-          const strId = String(item.id);
-          state.itemsById.set(strId, item);
-          newIds.push(strId);
-        }
-        if (item.userId) {
-          state.itemsByUserId.set(String(item.userId), item);
-        }
+        if (item.id) state.itemsById.set(String(item.id), item);
+        if (item.userId) state.itemsByUserId.set(String(item.userId), item);
         if (item.nickName) {
           const nickLower = item.nickName.trim().toLowerCase();
           state.itemsByNick.set(nickLower, item);
@@ -148,17 +137,11 @@
         }
       });
 
-      if (newIds.length > 0) {
-        state.lastItemIds = newIds;
-      }
-
       scheduleHighlight(10);
-    } catch (e) {
-      // Not JSON or other structure, ignore
-    }
+    } catch (e) {}
   }
 
-  // 4. Keyword Matching Engine
+  // 4. Keyword Matching
   function getActiveKeywords() {
     if (!state.settings.keywords || !Array.isArray(state.settings.keywords)) {
       return ['сбп', 'телефона'];
@@ -180,11 +163,8 @@
     return matched;
   }
 
-  // 5. DOM Row Discovery
+  // 5. DOM Discovery
   function findAllOrderRows() {
-    // Strategy A: Find all trade action buttons on the P2P page
-    // Every order row (closed or open) contains one of these buttons:
-    // "Buy USDT", "Sell USDT", "Купить USDT", "Hide", "Скрыть"
     const allButtons = Array.from(document.querySelectorAll('button')).filter(btn => {
       const txt = (btn.textContent || '').trim().toLowerCase();
       return txt.startsWith('buy') || txt.startsWith('sell') || 
@@ -204,7 +184,6 @@
             });
             if (siblingButtons.length >= 2) {
               const text = cur.textContent || '';
-              // Verify that this row contains order info (price/fiat or merchant)
               if (text.includes('RUB') || text.includes('USDT') || text.includes('Order') || text.includes('Заказ')) {
                 rows.push(cur);
                 break;
@@ -220,65 +199,110 @@
       }
     }
 
-    // Strategy B: Standard table rows (if Bybit uses <table>)
     const trs = Array.from(document.querySelectorAll('tbody tr, table tr')).filter(tr => {
       const text = tr.innerText || '';
       return !tr.querySelector('th') && (text.includes('RUB') || text.includes('USDT') || text.includes('Buy') || text.includes('Купить'));
     });
     if (trs.length > 0) return trs;
 
-    // Strategy C: CSS class rows
-    const classRows = Array.from(document.querySelectorAll(
+    return Array.from(document.querySelectorAll(
       'div[class*="trade-table__row"], div[class*="table-row"], div[class*="trade-row"], div[class*="advertiser-item"], div[class*="otc-item"]'
     ));
-    if (classRows.length > 0) return classRows;
-
-    return [];
   }
 
-  // Associate a DOM row with an intercepted API item
   function findItemForOrderRow(row) {
     const rowHtml = row.innerHTML || '';
     const rowText = (row.textContent || '').trim();
     const rowTextLower = rowText.toLowerCase();
 
-    // 1. Search by Item ID in attributes or HTML
     for (const [id, item] of state.itemsById.entries()) {
-      if (rowHtml.includes(id)) {
-        return item;
-      }
+      if (rowHtml.includes(id)) return item;
     }
 
-    // 2. Search by User ID (e.g. profile link)
     for (const [userId, item] of state.itemsByUserId.entries()) {
-      if (rowHtml.includes(userId)) {
-        return item;
-      }
+      if (rowHtml.includes(userId)) return item;
     }
 
-    // 3. Search by Nickname + Price
     for (const [key, item] of state.itemsByKey.entries()) {
       if (item.nickName) {
         const nickLower = item.nickName.trim().toLowerCase();
         if (rowTextLower.includes(nickLower)) {
-          if (item.price && rowText.includes(item.price)) {
-            return item;
-          }
+          if (item.price && rowText.includes(item.price)) return item;
         }
       }
     }
 
-    // 4. Search by Nickname alone
     for (const [nick, item] of state.itemsByNick.entries()) {
-      if (rowTextLower.includes(nick)) {
-        return item;
-      }
+      if (rowTextLower.includes(nick)) return item;
     }
 
     return null;
   }
 
-  // 6. Highlight and Decorate Rows
+  // 6. Highlight Keywords in Text Nodes (Green background + White text)
+  function highlightKeywordsInTextNodes(container, keywords) {
+    if (!container || !keywords || keywords.length === 0) return;
+
+    const escapedKws = keywords.map(escapeRegExp).filter(Boolean);
+    if (escapedKws.length === 0) return;
+    const regex = new RegExp(`(${escapedKws.join('|')})`, 'gi');
+
+    const walker = document.createTreeWalker(
+      container,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode(node) {
+          if (!node.nodeValue || !regex.test(node.nodeValue)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          const parent = node.parentElement;
+          if (!parent) return NodeFilter.FILTER_REJECT;
+          const tag = parent.tagName.toLowerCase();
+          if (['script', 'style', 'input', 'textarea', 'button', 'mark'].includes(tag)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          if (parent.closest('.bybit-p2p-match-container') || parent.closest('#bybit-p2p-floating-widget')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+
+    const textNodes = [];
+    while (walker.nextNode()) {
+      textNodes.push(walker.currentNode);
+    }
+
+    textNodes.forEach(node => {
+      const parent = node.parentElement;
+      if (!parent) return;
+      const text = node.nodeValue;
+      regex.lastIndex = 0;
+      if (!regex.test(text)) return;
+
+      const frag = document.createDocumentFragment();
+      let lastIdx = 0;
+      text.replace(regex, (match, p1, offset) => {
+        if (offset > lastIdx) {
+          frag.appendChild(document.createTextNode(text.slice(lastIdx, offset)));
+        }
+        const mark = document.createElement('mark');
+        mark.className = 'bybit-kw-highlight';
+        mark.textContent = match;
+        frag.appendChild(mark);
+        lastIdx = offset + match.length;
+        return match;
+      });
+      if (lastIdx < text.length) {
+        frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+      }
+
+      parent.replaceChild(frag, node);
+    });
+  }
+
+  // 7. Highlight and Decorate Rows
   function highlightOrders() {
     if (!state.settings.enabled) {
       removeAllHighlights();
@@ -301,9 +325,7 @@
       const item = findItemForOrderRow(row);
       const rowText = row.textContent || '';
 
-      // Matches in seller remark (from API)
       const remarkMatches = item && item.remark ? findMatchesInText(item.remark, keywords) : [];
-      // Matches directly in DOM row text (e.g. payment methods or notes)
       const textMatches = findMatchesInText(rowText, keywords);
 
       const allMatches = Array.from(new Set([...remarkMatches, ...textMatches]));
@@ -311,22 +333,27 @@
 
       if (isMatch) {
         matchedCount++;
+
+        // A. Apply clean green left stripe to row
         row.classList.add('bybit-p2p-highlighted-order');
         row.classList.remove('bybit-p2p-dimmed-order', 'bybit-p2p-hidden-order');
 
-        // Render / Update Match Badge right on the row
-        renderBadge(row, allMatches);
-
-        // Render / Update Remark Preview if available and enabled
-        if (state.settings.showRemarkPreview && item && item.remark) {
-          renderRemarkBox(row, item.remark, keywords);
-        } else {
-          removeRemarkBox(row);
+        // B. If row is expanded, find the expanded card and apply green left stripe to it as well
+        const expandedCard = findExpandedCard(row);
+        if (expandedCard) {
+          expandedCard.classList.add('bybit-p2p-highlighted-card');
         }
+
+        // C. Highlight matching keywords inside the text (green background, white text)
+        highlightKeywordsInTextNodes(row, keywords);
+
+        // D. Place badge AT THE TOP (in title of Advertiser Terms or next to payment methods)
+        renderTopBadge(row, expandedCard, allMatches);
       } else {
         row.classList.remove('bybit-p2p-highlighted-order');
-        removeBadge(row);
-        removeRemarkBox(row);
+        const expandedCard = findExpandedCard(row);
+        if (expandedCard) expandedCard.classList.remove('bybit-p2p-highlighted-card');
+        removeBadges(row);
 
         if (state.settings.hideNonMatching) {
           row.classList.add('bybit-p2p-hidden-order');
@@ -344,93 +371,96 @@
     updateFloatingWidget(matchedCount, rows.length);
   }
 
-  function renderBadge(row, matchedKeywords) {
-    let container = row.querySelector('.bybit-p2p-match-container');
-    if (!container) {
-      container = document.createElement('div');
-      container.className = 'bybit-p2p-match-container';
+  function findExpandedCard(row) {
+    // Look for the expanded container with "Advertiser Terms" or "I will pay"
+    const candidates = Array.from(row.querySelectorAll('div')).filter(div => {
+      const text = div.textContent || '';
+      return text.includes('Advertiser Terms') || text.includes('Условия рекламодателя') || text.includes('I will pay');
+    });
+    if (candidates.length > 0) {
+      // Find the outermost card container for this section
+      let card = candidates[0];
+      while (card && card.parentElement && card.parentElement !== row) {
+        if (card.parentElement.children.length === 1 || card.parentElement.classList.contains('bybit-p2p-highlighted-order')) {
+          break;
+        }
+        card = card.parentElement;
+      }
+      return card;
+    }
+    return null;
+  }
 
-      // Find the payment methods cell (typically contains "Mobile Top-up" or "Bank Transfer")
-      // or append inside column 4 or first column
-      let targetCell = null;
-      for (const child of row.children) {
-        const text = child.textContent || '';
-        if (text.includes('Top-up') || text.includes('Transfer') || text.includes('Bank') || text.includes('Cash')) {
-          targetCell = child;
+  // Render badge AT THE TOP (never at the bottom)
+  function renderTopBadge(row, expandedCard, matchedKeywords) {
+    const labelText = matchedKeywords.map(k => k.toUpperCase()).join(' • ');
+
+    // 1. If card is expanded: place badge right next to "Advertiser Terms" heading
+    if (expandedCard) {
+      let termsHeader = null;
+      const allHeadings = Array.from(expandedCard.querySelectorAll('h1, h2, h3, h4, div, span'));
+      for (const el of allHeadings) {
+        const text = (el.textContent || '').trim();
+        if (text === 'Advertiser Terms' || text === 'Условия рекламодателя' || text.startsWith('Advertiser Terms')) {
+          termsHeader = el;
           break;
         }
       }
-      if (!targetCell) {
-        targetCell = row.children[3] || row.children[0] || row;
+
+      if (termsHeader) {
+        let badge = termsHeader.querySelector('.bybit-p2p-match-container');
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'bybit-p2p-match-container';
+          termsHeader.appendChild(badge);
+        }
+        badge.innerHTML = `
+          <span class="bybit-p2p-match-tag">
+            <span class="bybit-tag-icon">⚡</span>
+            <span>${escapeHtml(labelText)}</span>
+          </span>
+        `;
+        return;
       }
-      targetCell.appendChild(container);
     }
 
-    const labelText = matchedKeywords.map(k => k.toUpperCase()).join(' • ');
-    container.innerHTML = `
-      <span class="bybit-p2p-match-tag" title="Найдено в условиях сделки (СБП)">
+    // 2. On the top row: place next to payment methods at the top
+    let targetCell = null;
+    for (const child of row.children) {
+      const text = child.textContent || '';
+      if (text.includes('Top-up') || text.includes('Transfer') || text.includes('Bank') || text.includes('Cash')) {
+        targetCell = child;
+        break;
+      }
+    }
+    if (!targetCell) {
+      targetCell = row.children[3] || row.children[0] || row;
+    }
+
+    let badge = targetCell.querySelector('.bybit-p2p-match-container');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'bybit-p2p-match-container';
+      targetCell.appendChild(badge);
+    }
+    badge.innerHTML = `
+      <span class="bybit-p2p-match-tag">
         <span class="bybit-tag-icon">⚡</span>
         <span>${escapeHtml(labelText)}</span>
       </span>
     `;
   }
 
-  function removeBadge(row) {
-    const container = row.querySelector('.bybit-p2p-match-container');
-    if (container) container.remove();
-  }
-
-  function renderRemarkBox(row, remark, keywords) {
-    let box = row.querySelector('.bybit-p2p-remark-box');
-    if (!box) {
-      box = document.createElement('div');
-      box.className = 'bybit-p2p-remark-box';
-
-      // Always append to row container; CSS flex-basis: 100% causes it to span the bottom
-      row.appendChild(box);
-    }
-
-    // Check if user already expanded it
-    const isExpanded = box.getAttribute('data-expanded') === 'true';
-
-    // Highlight keywords in remark text safely
-    const highlightedHtml = highlightKeywordsInHtml(remark, keywords);
-
-    box.innerHTML = `
-      <div class="bybit-p2p-remark-header">
-        <span>📝 Условия продавца:</span>
-        <button type="button" class="bybit-remark-toggle-btn">${isExpanded ? 'Свернуть' : 'Подробнее'}</button>
-      </div>
-      <div class="bybit-p2p-remark-content ${isExpanded ? '' : 'bybit-collapsed'}">
-        ${highlightedHtml}
-      </div>
-    `;
-
-    const toggleBtn = box.querySelector('.bybit-remark-toggle-btn');
-    const content = box.querySelector('.bybit-p2p-remark-content');
-    toggleBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const currentlyExpanded = box.getAttribute('data-expanded') === 'true';
-      if (currentlyExpanded) {
-        box.setAttribute('data-expanded', 'false');
-        content.classList.add('bybit-collapsed');
-        toggleBtn.textContent = 'Подробнее';
-      } else {
-        box.setAttribute('data-expanded', 'true');
-        content.classList.remove('bybit-collapsed');
-        toggleBtn.textContent = 'Свернуть';
-      }
-    });
-  }
-
-  function removeRemarkBox(row) {
-    const box = row.querySelector('.bybit-p2p-remark-box');
-    if (box) box.remove();
+  function removeBadges(row) {
+    row.querySelectorAll('.bybit-p2p-match-container').forEach(el => el.remove());
   }
 
   function removeAllHighlights() {
     document.querySelectorAll('.bybit-p2p-highlighted-order').forEach(el => {
       el.classList.remove('bybit-p2p-highlighted-order');
+    });
+    document.querySelectorAll('.bybit-p2p-highlighted-card').forEach(el => {
+      el.classList.remove('bybit-p2p-highlighted-card');
     });
     document.querySelectorAll('.bybit-p2p-dimmed-order').forEach(el => {
       el.classList.remove('bybit-p2p-dimmed-order');
@@ -439,19 +469,13 @@
       el.classList.remove('bybit-p2p-hidden-order');
     });
     document.querySelectorAll('.bybit-p2p-match-container').forEach(el => el.remove());
-    document.querySelectorAll('.bybit-p2p-remark-box').forEach(el => el.remove());
-  }
-
-  function highlightKeywordsInHtml(text, keywords) {
-    if (!text) return '';
-    let escaped = escapeHtml(text);
-    if (!keywords || keywords.length === 0) return escaped;
-
-    const escapedKws = keywords.map(escapeRegExp).filter(Boolean);
-    if (escapedKws.length === 0) return escaped;
-
-    const regex = new RegExp(`(${escapedKws.join('|')})`, 'gi');
-    return escaped.replace(regex, '<mark class="bybit-kw-highlight">$1</mark>');
+    document.querySelectorAll('.bybit-kw-highlight').forEach(el => {
+      const parent = el.parentNode;
+      if (parent) {
+        parent.replaceChild(document.createTextNode(el.textContent), el);
+        parent.normalize();
+      }
+    });
   }
 
   function escapeHtml(str) {
@@ -468,7 +492,7 @@
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  // 7. Floating On-Page Quick Widget
+  // 8. Floating On-Page Quick Widget
   function updateFloatingWidget(matched, total) {
     if (!state.settings.enabled) {
       const widget = document.getElementById('bybit-p2p-floating-widget');
@@ -520,14 +544,14 @@
     }, delay);
   }
 
-  // 8. Dynamic Updates via MutationObserver & Routing
+  // 9. Dynamic Updates via MutationObserver & Routing
   function setupObserver() {
     const observer = new MutationObserver((mutations) => {
       let shouldUpdate = false;
       for (const m of mutations) {
         if (m.addedNodes.length > 0 || m.removedNodes.length > 0) {
           const target = m.target;
-          if (target && target.closest && (target.closest('#bybit-p2p-floating-widget') || target.closest('.bybit-p2p-remark-box'))) {
+          if (target && target.closest && (target.closest('#bybit-p2p-floating-widget') || target.closest('.bybit-p2p-match-container'))) {
             continue;
           }
           shouldUpdate = true;
@@ -541,14 +565,12 @@
 
     observer.observe(document.body, { childList: true, subtree: true });
 
-    // Periodic check to capture virtual lists or late renders
     setInterval(() => {
       if (state.settings.enabled && window.location.href.includes('otc')) {
         highlightOrders();
       }
     }, 2000);
 
-    // Watch URL / History changes
     window.addEventListener('popstate', () => scheduleHighlight(200));
     window.addEventListener('hashchange', () => scheduleHighlight(200));
   }
