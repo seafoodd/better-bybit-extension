@@ -474,28 +474,91 @@ export default defineContentScript({
       }, 350);
     }
 
-    // Expose the "All" button prominently to the right of the price input
+    function findOuterInputBox(input: HTMLInputElement): HTMLElement {
+      let cur: HTMLElement = input;
+      let outerBox: HTMLElement = input;
+
+      while (cur && cur.parentElement) {
+        const parent = cur.parentElement;
+        if (parent.tagName === 'TR' || parent.id === 'root' || parent.classList.contains('bybit-all-input-row')) {
+          break;
+        }
+
+        const isOuterInput = cur.classList.contains('moly-input') || 
+                             cur.classList.contains('bds-input') ||
+                             cur.getAttribute('data-guide') === 'pay-amount-input';
+
+        if (isOuterInput) {
+          outerBox = cur;
+          break;
+        }
+
+        const hasSiblingLabel = Array.from(parent.children).some(child => {
+          if (child === cur || child.contains(cur)) return false;
+          const t = (child.textContent || '').trim().toLowerCase();
+          return t === 'i will pay' || t === 'я заплачу' || t.startsWith('i will pay') || t === 'i will receive';
+        });
+
+        if (hasSiblingLabel) {
+          outerBox = cur;
+          break;
+        }
+
+        cur = parent;
+      }
+
+      return outerBox;
+    }
+
+    // Expose the "All" button prominently to the right of the price input (Strictly ONE button outside input)
     function exposeAllButton(container: HTMLElement) {
       const payInput = findPayAmountInput(container);
       if (!payInput) return;
 
-      // Find the input container (moly-input or input wrapper)
-      const inputWrapper = payInput.closest<HTMLElement>('.moly-input, [class*="input"], div.relative') || payInput.parentElement;
-      if (!inputWrapper || !inputWrapper.parentElement) return;
+      const outerBox = findOuterInputBox(payInput);
+      if (!outerBox || !outerBox.parentElement) return;
 
-      // Check if already has externalAllBtn
-      let rowWrapper = inputWrapper.parentElement;
-      let externalAllBtn = rowWrapper.querySelector<HTMLButtonElement>('.bybit-prominent-all-btn');
+      // 1. Remove ANY rogue .bybit-prominent-all-btn inside outerBox
+      outerBox.querySelectorAll('.bybit-prominent-all-btn').forEach(b => b.remove());
+
+      // 2. Hide Bybit's native internal orange "All" button inside outerBox so it NEVER renders inside input
+      let nativeAllBtn: HTMLElement | null = null;
+      const allCandidates = Array.from(outerBox.querySelectorAll<HTMLElement>('*'));
+      for (const el of allCandidates) {
+        if (el.classList.contains('bybit-prominent-all-btn')) {
+          el.remove();
+          continue;
+        }
+        const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+        if ((t === 'all' || t === 'все' || t === 'max') && el.children.length === 0) {
+          nativeAllBtn = el;
+          el.classList.add('bybit-native-all-hidden');
+          el.style.setProperty('display', 'none', 'important');
+        }
+      }
+
+      // 3. Ensure outerBox is cleanly wrapped in .bybit-all-input-row
+      let rowWrapper = outerBox.parentElement;
+      if (!rowWrapper.classList.contains('bybit-all-input-row')) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'bybit-all-input-row';
+        outerBox.parentNode?.insertBefore(wrapper, outerBox);
+        wrapper.appendChild(outerBox);
+        rowWrapper = wrapper;
+      }
+
+      // 4. Ensure there is EXACTLY ONE external "ALL" button in rowWrapper, directly to the right of outerBox
+      const existingBtns = Array.from(rowWrapper.querySelectorAll<HTMLButtonElement>('.bybit-prominent-all-btn'));
+      let externalAllBtn = existingBtns[0] || null;
+
+      // Remove any extra duplicate buttons
+      if (existingBtns.length > 1) {
+        for (let i = 1; i < existingBtns.length; i++) {
+          existingBtns[i].remove();
+        }
+      }
 
       if (!externalAllBtn) {
-        if (!rowWrapper.classList.contains('bybit-all-input-row')) {
-          const wrapper = document.createElement('div');
-          wrapper.className = 'bybit-all-input-row';
-          inputWrapper.parentNode?.insertBefore(wrapper, inputWrapper);
-          wrapper.appendChild(inputWrapper);
-          rowWrapper = wrapper;
-        }
-
         externalAllBtn = document.createElement('button');
         externalAllBtn.type = 'button';
         externalAllBtn.className = 'bybit-prominent-all-btn';
@@ -506,12 +569,7 @@ export default defineContentScript({
           e.preventDefault();
           e.stopPropagation();
 
-          // 1. Native All button click if found
-          const allCandidates = Array.from(inputWrapper.querySelectorAll<HTMLElement>('*'));
-          const nativeAllBtn = allCandidates.find(el => {
-            const t = (el.innerText || el.textContent || '').trim().toLowerCase();
-            return t === 'all' || t === 'все' || t === 'max';
-          });
+          // 1. Trigger native All button if present
           if (nativeAllBtn) {
             simulateUserClick(nativeAllBtn);
           }
@@ -525,6 +583,11 @@ export default defineContentScript({
         });
 
         rowWrapper.appendChild(externalAllBtn);
+      } else {
+        // Ensure externalAllBtn is placed AFTER outerBox
+        if (externalAllBtn.previousElementSibling !== outerBox) {
+          rowWrapper.appendChild(externalAllBtn);
+        }
       }
     }
 

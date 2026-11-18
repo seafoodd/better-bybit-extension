@@ -171,7 +171,7 @@ body.bybit-suppress-dropdown [data-guide="payment-method"] > div:nth-child(2) {
   background-color: #334155 !important;
 }
 
-/* 6. Prominent "ALL" Button next to Price Input */
+/* 6. Prominent "ALL" Button strictly outside the price input */
 .bybit-all-input-row,
 .bybit-all-btn-wrapper {
   display: flex !important;
@@ -184,6 +184,13 @@ body.bybit-suppress-dropdown [data-guide="payment-method"] > div:nth-child(2) {
 .bybit-all-btn-wrapper > *:first-child {
   flex: 1 1 auto !important;
   min-width: 0 !important;
+}
+
+/* Hide any native or internal All buttons inside the input box */
+.bybit-native-all-hidden,
+.bybit-all-input-row .moly-input [class*="all"],
+.bybit-all-input-row [class*="input__suffix"] > span:first-child:not(:last-child) {
+  display: none !important;
 }
 
 .bybit-prominent-all-btn {
