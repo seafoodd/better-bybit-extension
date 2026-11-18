@@ -1,8 +1,8 @@
 /**
  * Bybit P2P Order Highlighter - Content Script
  * 1. Highlights keywords in terms text (green background, white text).
- * 2. Positions the badge right next to "Price xx.xx RUB xxs".
- * 3. Auto-selects "Mobile Top-up" (or fallback "Bank Transfer") on USDT/RUB buy pages.
+ * 2. Positions the badge right next to "Price xx.xx RUB xxs" in the red box.
+ * 3. Instantly auto-selects "Mobile Top-up" (or fallback "Bank Transfer") on USDT/RUB buy page without visible popup flicker.
  * 4. Renders a continuous solid green left stripe.
  */
 (() => {
@@ -73,25 +73,52 @@
     document.documentElement.setAttribute('data-bybit-theme', color || 'emerald');
   }
 
-  // 2. USDT/RUB Page Detection
+  // 2. USDT/RUB Page Detection (strictly for USDT / RUB buy)
   function isUsdtRubPage() {
     const href = window.location.href.toLowerCase();
     return href.includes('usdt') && href.includes('rub');
   }
 
-  // 3. Auto-Select Payment Method ("Mobile Top-up" -> "Bank Transfer")
-  function autoSelectPaymentMethod(card) {
+  // 3. Instant Auto-Select Payment Method ("Mobile Top-up" -> "Bank Transfer")
+  function injectDropdownSuppressionStyle() {
+    if (document.getElementById('bybit-suppress-dropdown-style')) return;
+    const style = document.createElement('style');
+    style.id = 'bybit-suppress-dropdown-style';
+    style.textContent = `
+      .moly-select-dropdown,
+      .ant-select-dropdown,
+      div[class*="dropdown"],
+      div[class*="popover"],
+      div[class*="select-list"],
+      div[role="listbox"] {
+        opacity: 0 !important;
+        pointer-events: auto !important;
+        transition: none !important;
+        animation: none !important;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function removeDropdownSuppressionStyle() {
+    setTimeout(() => {
+      const style = document.getElementById('bybit-suppress-dropdown-style');
+      if (style) style.remove();
+    }, 150);
+  }
+
+  function autoSelectPaymentMethod(container) {
     if (!isUsdtRubPage()) return;
-    if (card.__paymentAutoSelected) return;
+    if (container.__paymentAutoSelected) return;
 
     // Find the payment method dropdown trigger inside the card
-    const selectorEl = findPaymentMethodSelector(card);
+    const selectorEl = findPaymentMethodSelector(container);
     if (!selectorEl) return;
 
     const currentText = (selectorEl.textContent || '').trim();
-    // If a payment method is already selected, mark as done
+    // If a payment method is already chosen, done
     if (currentText.includes('Mobile Top-up') || currentText.includes('Bank Transfer')) {
-      card.__paymentAutoSelected = true;
+      container.__paymentAutoSelected = true;
       return;
     }
 
@@ -100,17 +127,19 @@
       return;
     }
 
-    card.__paymentAutoSelected = true;
+    container.__paymentAutoSelected = true;
 
-    // Open the dropdown
-    selectorEl.click();
+    // Suppress visible popup animation so the selection feels instant
+    injectDropdownSuppressionStyle();
+
+    // Trigger open
     selectorEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    selectorEl.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+    selectorEl.click();
 
-    // Try finding and clicking the option
+    // Try finding and clicking the option instantly
     function tryClickOption() {
-      // Find all options in document
-      const allElements = Array.from(document.querySelectorAll('div, li, span, p')).filter(el => {
-        if (el.offsetWidth === 0 && el.offsetHeight === 0) return false;
+      const allElements = Array.from(document.querySelectorAll('div, li, span, p, [role="option"]')).filter(el => {
         const t = (el.textContent || '').trim();
         return t === 'Mobile Top-up' || t === 'Bank Transfer';
       });
@@ -123,29 +152,35 @@
       }
 
       if (target) {
-        target.click();
         target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
         target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+        target.click();
+        removeDropdownSuppressionStyle();
         return true;
       }
       return false;
     }
 
-    // Schedule attempts after dropdown opens
-    setTimeout(() => {
-      if (!tryClickOption()) {
-        setTimeout(() => {
-          if (!tryClickOption()) {
-            setTimeout(tryClickOption, 250);
-          }
-        }, 150);
-      }
-    }, 100);
+    // Execute immediately on microtask tick, retry quickly if needed
+    if (!tryClickOption()) {
+      queueMicrotask(() => {
+        if (!tryClickOption()) {
+          requestAnimationFrame(() => {
+            if (!tryClickOption()) {
+              setTimeout(() => {
+                tryClickOption();
+                removeDropdownSuppressionStyle();
+              }, 60);
+            }
+          });
+        }
+      });
+    }
   }
 
-  function findPaymentMethodSelector(card) {
-    const candidates = Array.from(card.querySelectorAll('div, button, input')).filter(el => {
-      const text = (el.textContent || '').trim();
+  function findPaymentMethodSelector(container) {
+    const candidates = Array.from(container.querySelectorAll('*')).filter(el => {
+      const text = (el.innerText || el.textContent || '').trim();
       return text.includes('Select A Payment Method') || 
              text.includes('Select a payment method') || 
              text.includes('Select Payment Method') ||
@@ -155,7 +190,7 @@
 
     if (candidates.length === 0) return null;
 
-    // Return the innermost matching container or clickable element
+    // Get innermost node
     const target = candidates[candidates.length - 1];
     return target.closest('div[tabindex], div[class*="select"], button') || target;
   }
@@ -245,88 +280,56 @@
     });
   }
 
-  // 6. DOM Discovery & Card Processing
-  function findOrderContainers() {
-    // Look for all order cards / containers on the page
-    const buttons = Array.from(document.querySelectorAll('button')).filter(btn => {
-      const txt = (btn.textContent || '').trim().toLowerCase();
-      return txt.startsWith('buy') || txt.startsWith('sell') || 
-             txt.startsWith('купить') || txt.startsWith('продать') ||
-             txt === 'hide' || txt === 'скрыть';
-    });
-
-    if (buttons.length > 0) {
-      const rows = [];
-      buttons.forEach(btn => {
-        let cur = btn.parentElement;
-        while (cur && cur !== document.body) {
-          const parent = cur.parentElement;
-          if (parent) {
-            const siblingButtons = Array.from(parent.children).filter(child => {
-              return child.querySelector && child.querySelector('button');
-            });
-            if (siblingButtons.length >= 2) {
-              const text = cur.textContent || '';
-              if (text.includes('RUB') || text.includes('USDT') || text.includes('Order') || text.includes('Заказ')) {
-                rows.push(cur);
-                break;
-              }
-            }
-          }
-          cur = cur.parentElement;
-        }
-      });
-      if (rows.length > 0) {
-        return Array.from(new Set(rows));
-      }
-    }
-
-    return [];
-  }
-
-  function findExpandedCard(row) {
-    const candidates = Array.from(row.querySelectorAll('div')).filter(div => {
-      const text = div.textContent || '';
+  // 6. Find Open Expanded Order Container (Across the whole document)
+  function findOpenOrderContainers() {
+    // Find all containers where an order is expanded
+    const containers = Array.from(document.querySelectorAll('tr, div')).filter(el => {
+      const text = el.textContent || '';
       return (text.includes('Advertiser Terms') || text.includes('Условия рекламодателя')) && 
-             (text.includes('I will pay') || text.includes('Price') || text.includes('Buy'));
+             (text.includes('I will pay') || text.includes('Buy') || text.includes('Price'));
     });
-    if (candidates.length > 0) {
-      let card = candidates[0];
-      while (card && card.parentElement && card.parentElement !== row) {
-        if (card.parentElement.children.length === 1 || card.parentElement.classList.contains('bybit-p2p-highlighted-order')) {
+
+    if (containers.length === 0) return [];
+
+    // Filter to the top-level row/card for each open order
+    const result = [];
+    containers.forEach(c => {
+      // Find the row (tr) or outer card
+      let outer = c;
+      while (outer && outer.parentElement && outer.tagName !== 'TR' && outer.parentElement !== document.body) {
+        if (outer.parentElement.tagName === 'TR' || outer.parentElement.classList.contains('trade-table__row')) {
+          outer = outer.parentElement;
           break;
         }
-        card = card.parentElement;
+        outer = outer.parentElement;
       }
-      return card;
-    }
-    return null;
+      if (outer && !result.includes(outer)) {
+        result.push(outer);
+      }
+    });
+
+    return result.length > 0 ? result : [containers[0]];
   }
 
-  // Find the "Price xx.xx RUB xxs" element inside the expanded card
-  function findPriceHeaderElement(card) {
-    const candidates = Array.from(card.querySelectorAll('div, span, p')).filter(el => {
-      const text = (el.textContent || '').trim();
-      return (text.startsWith('Price') || text.startsWith('Цена')) && 
-             (text.includes('RUB') || text.includes('USDT')) &&
-             (text.includes('s') || text.includes('сек') || /\d+\.\d+/.test(text));
+  // Find the exact element containing "Price xx.xx RUB xxs"
+  function findPriceHeaderElement(container) {
+    const candidates = Array.from(container.querySelectorAll('*')).filter(el => {
+      const t = (el.innerText || el.textContent || '').trim();
+      return (t.startsWith('Price') || t.startsWith('Цена')) && 
+             (t.includes('RUB') || t.includes('USDT')) &&
+             !t.includes('I will pay') && 
+             !t.includes('Advertiser Terms');
     });
 
     if (candidates.length === 0) return null;
 
-    // Pick the most specific flex container that holds the price text
-    let target = candidates[0];
-    for (const c of candidates) {
-      if (c.children.length > 0 && (c.innerText || '').includes('Price')) {
-        target = c;
-      }
-    }
-    return target;
+    // Pick the most specific container that has the Price text
+    return candidates[0];
   }
 
-  // 7. Core Highlight Execution
+  // 7. Core Highlight & Auto-Select Execution
   function highlightOrders() {
-    // Clean up any old floating widget if present
+    // Ensure any old widget is removed
     const oldWidget = document.getElementById('bybit-p2p-floating-widget');
     if (oldWidget) oldWidget.remove();
 
@@ -336,50 +339,44 @@
     }
 
     const keywords = getActiveKeywords();
-    if (keywords.length === 0) {
-      removeAllHighlights();
-      return;
-    }
+    const openOrders = findOpenOrderContainers();
 
-    const containers = findOrderContainers();
-
-    containers.forEach(row => {
-      const expandedCard = findExpandedCard(row);
-
-      // 1. Auto-select payment method if card is expanded on USDT/RUB page
-      if (expandedCard) {
-        autoSelectPaymentMethod(expandedCard);
-      }
+    openOrders.forEach(card => {
+      // 1. Instant Auto-Select Payment Method (USDT / RUB only)
+      autoSelectPaymentMethod(card);
 
       // 2. Check if terms contain keywords
-      const text = row.textContent || '';
+      const text = card.textContent || '';
       const matched = findMatchesInText(text, keywords);
       const isMatch = matched.length > 0;
 
       if (isMatch) {
         // Apply solid green left stripe
-        row.classList.add('bybit-p2p-highlighted-order');
-        if (expandedCard) {
-          expandedCard.classList.add('bybit-p2p-highlighted-card');
-        }
+        card.classList.add('bybit-p2p-highlighted-card');
+        card.classList.add('bybit-p2p-highlighted-order');
 
         // Highlight matched keywords inside text (green background, white text)
-        highlightKeywordsInTextNodes(row, keywords);
+        highlightKeywordsInTextNodes(card, keywords);
 
         // Position badge immediately to the right of "Price xx.xx RUB xxs"
-        renderBadgeNextToPrice(expandedCard || row, matched);
+        renderBadgeNextToPrice(card, matched);
       } else {
-        row.classList.remove('bybit-p2p-highlighted-order');
-        if (expandedCard) expandedCard.classList.remove('bybit-p2p-highlighted-card');
-        removeBadges(row);
+        card.classList.remove('bybit-p2p-highlighted-card');
+        card.classList.remove('bybit-p2p-highlighted-order');
+        removeBadges(card);
       }
     });
   }
 
-  // Place the badge immediately to the right of Price xx.xx RUB xxs
-  function renderBadgeNextToPrice(container, matchedKeywords) {
-    const priceHeader = findPriceHeaderElement(container);
+  // Place badge immediately to the right of "Price xx.xx RUB xxs" (in the red box)
+  function renderBadgeNextToPrice(card, matchedKeywords) {
+    const priceHeader = findPriceHeaderElement(card);
     if (!priceHeader) return;
+
+    // Remove any badges placed in wrong locations
+    card.querySelectorAll('.bybit-p2p-match-container').forEach(b => {
+      if (b.parentElement !== priceHeader) b.remove();
+    });
 
     let badgeContainer = priceHeader.querySelector('.bybit-p2p-match-container');
     if (!badgeContainer) {
@@ -397,8 +394,8 @@
     `;
   }
 
-  function removeBadges(row) {
-    row.querySelectorAll('.bybit-p2p-match-container').forEach(el => el.remove());
+  function removeBadges(card) {
+    card.querySelectorAll('.bybit-p2p-match-container').forEach(el => el.remove());
   }
 
   function removeAllHighlights() {
@@ -441,7 +438,7 @@
     }, delay);
   }
 
-  // 8. Mutation Observer & History routing
+  // 8. Mutation Observer & Routing
   function setupObserver() {
     const observer = new MutationObserver((mutations) => {
       let shouldUpdate = false;
@@ -456,20 +453,20 @@
         }
       }
       if (shouldUpdate) {
-        scheduleHighlight(100);
+        scheduleHighlight(60);
       }
     });
 
     observer.observe(document.body, { childList: true, subtree: true });
 
     setInterval(() => {
-      if (state.settings.enabled && window.location.href.includes('p2p')) {
+      if (state.settings.enabled) {
         highlightOrders();
       }
-    }, 1500);
+    }, 1000);
 
-    window.addEventListener('popstate', () => scheduleHighlight(200));
-    window.addEventListener('hashchange', () => scheduleHighlight(200));
+    window.addEventListener('popstate', () => scheduleHighlight(150));
+    window.addEventListener('hashchange', () => scheduleHighlight(150));
   }
 
   // Initialization
@@ -482,15 +479,15 @@
 
     if (document.body) {
       setupObserver();
-      scheduleHighlight(200);
+      scheduleHighlight(150);
     } else {
       document.addEventListener('DOMContentLoaded', () => {
         setupObserver();
-        scheduleHighlight(200);
+        scheduleHighlight(150);
       });
     }
 
-    console.log('[Bybit Highlighter] Extension active (v1.0.2)');
+    console.log('[Bybit Highlighter] Extension active (v1.0.3)');
   }
 
   init();
