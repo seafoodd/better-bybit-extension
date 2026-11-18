@@ -67,19 +67,25 @@ thead.bybit-p2p-highlighted-card,
 .bybit-p2p-highlighted-order {
   border-top-left-radius: 0 !important;
   border-bottom-left-radius: 0 !important;
-  background-color: var(--bybit-hl-bg) !important;
   position: relative !important;
   transition: border-color 0.2s ease, background-color 0.2s ease !important;
 }
 
+/* For table rows: paint background ONLY on TD, keep TR transparent to prevent double-overlay */
 tr.bybit-p2p-highlighted-order {
   border-left: none !important;
+  background-color: transparent !important;
 }
 
 tr.bybit-p2p-highlighted-order > td {
   background-color: var(--bybit-hl-bg) !important;
   padding-left: 8px !important;
   padding-right: 8px !important;
+}
+
+/* For standalone order elements like cards, paint the background once */
+div.bybit-p2p-highlighted-order {
+  background-color: var(--bybit-hl-bg) !important;
 }
 
 tr.bybit-p2p-highlighted-order > td:first-child {
@@ -112,6 +118,8 @@ tr.bybit-p2p-highlighted-order > td:last-child {
 
 /* Seamless background for action button container in highlighted orders */
 .bybit-p2p-highlighted-order .fiat-p2p__action-button-inner,
+.bybit-p2p-highlighted-order .fiat-p2p__action-button-hide-inner,
+.bybit-p2p-highlighted-order .fiat-p2p__action-button-hide-wrapper,
 .bybit-p2p-highlighted-order .fiat-p2p__action-button-wrapper,
 .bybit-p2p-highlighted-order td.trade-list-action-button {
   background: var(--bybit-hl-solid-bg, #ecf9f5) !important;
