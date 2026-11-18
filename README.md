@@ -21,23 +21,42 @@
 
 ---
 
-## 🚀 Установка в Firefox
+## 🚀 Сборка и установка
 
-### Способ 1: Временная загрузка (Быстро, без перезапуска)
+### Требования
+* **Node.js** (v18+)
+* **pnpm** (или npm / yarn)
 
-1. Откройте **Firefox** и введите в адресной строке:
-   ```text
-   about:debugging#/runtime/this-firefox
-   ```
-2. В блоке **Временные расширения** (Temporary Extensions) нажмите кнопку:
-   **«Загрузить временное дополнение…»** (Load Temporary Add-on...).
-3. Перейдите в папку проекта и выберите файл:
-   ```text
-   C:\Dev\better-bybit\manifest.json
-   ```
-   *(Либо готовый архив `bybit-p2p-highlighter.zip`)*.
-4. Расширение мгновенно установится и появится в панели дополнений Firefox!
-5. Перейдите на страницу **Bybit P2P** (`https://www.bybit.com/fiat/trade/otc`) — подходящие ордера сразу начнут подсвечиваться.
+### Установка зависимостей и сборка
+```bash
+# Установка зависимостей
+pnpm install
+
+# Проверка типов
+pnpm compile
+
+# Сборка для Firefox (Manifest V3)
+pnpm run build:firefox
+
+# Или сборка для Chrome / Chromium (Manifest V3)
+pnpm run build
+```
+
+Собранные файлы расширения появятся в каталоге `.output/firefox-mv3` или `.output/chrome-mv3`.
+
+---
+
+### Загрузка в браузер
+
+#### Firefox
+1. Откройте страницу `about:debugging#/runtime/this-firefox` в браузере.
+2. В секции **Временные расширения** нажмите **«Загрузить временное дополнение…»** (Load Temporary Add-on).
+3. Выберите файл `.output/firefox-mv3/manifest.json` (или собранный `.zip` архив из папки `.output`).
+
+#### Chrome / Chromium (Яндекс.Браузер, Edge, Brave)
+1. Откройте `chrome://extensions` и включите **«Режим разработчика»** (Developer mode).
+2. Нажмите **«Загрузить распакованное расширение»** (Load unpacked).
+3. Укажите папку проекта: `.output/chrome-mv3`.
 
 ---
 
@@ -63,21 +82,36 @@
 
 ---
 
-## 📁 Структура проекта
+## 📁 Архитектура и структура проекта
+
+Проект разработан на **TypeScript** с использованием фреймворка **[WXT](https://wxt.dev/)**:
 
 ```text
 better-bybit/
-├── manifest.json              # Манифест Firefox WebExtension Manifest V3
-├── icons/                     # Иконки расширения (16x16, 48x48, 128x128)
-├── content/
-│   ├── content.js             # Главный скрипт: перехват API, матчинг, подсветка и виджет
-│   ├── content.css            # Стили подсветки, бейджей, блока условий и тем
-│   └── injected.js            # Перехватчик Fetch & XHR в контексте страницы
-├── popup/
-│   ├── popup.html             # Всплывающее окно настроек
-│   ├── popup.css              # Стилизация меню управления в тёмной теме
-│   └── popup.js               # Логика управления ключевыми словами и синхронизация
-└── bybit-p2p-highlighter.zip  # Готовый архив для загрузки в браузер
+├── entrypoints/
+│   ├── content/               # Точка входа Content Script
+│   │   ├── index.ts           # Инициализация и координация сервисов
+│   │   └── style.css          # Стили подсветки, тегов и бейджей
+│   ├── injected.content.ts    # Main-world скрипт перехвата XHR/Fetch API Bybit
+│   └── popup/                 # Всплывающее окно настроек расширения
+│       ├── index.html
+│       ├── main.ts
+│       └── style.css
+├── src/
+│   ├── constants/             # Селекторы DOM и конфигурация
+│   ├── content/               # Модули анализа и модификации страницы
+│   │   ├── amountInput.ts     # Автозаполнение суммы кликом по числам
+│   │   ├── observer.ts        # Наблюдатель за DOM и перерисовка таблицы
+│   │   ├── orderHighlighter.ts# Логика подсветки строк и бейджей
+│   │   ├── orderMatcher.ts    # Сопоставление данных API с элементами DOM
+│   │   ├── pageDetector.ts    # Определение активного типа страницы
+│   │   └── paymentSelector.ts # Управление фильтрами способов оплаты
+│   ├── services/              # Хранилище настроек (Storage) и OTC Store
+│   ├── types/                 # TypeScript интерфейсы и контракты данных
+│   └── utils/                 # Утилиты обработки DOM, чисел и текста
+├── public/                    # Статические иконки и ассеты
+├── wxt.config.ts              # Конфигурация WXT (манифест MV3, разрешения)
+└── package.json
 ```
 
 ---

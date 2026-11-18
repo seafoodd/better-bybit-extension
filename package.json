@@ -2,6 +2,7 @@
   "name": "better-bybit",
   "version": "1.0.9",
   "description": "Highlights Bybit P2P orders matching keywords (like СБП, телефона) in seller remarks and payment terms.",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
