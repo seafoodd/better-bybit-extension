@@ -139,11 +139,9 @@
       simulateUserClick(inner);
     }
 
-    // 2. Dispatch to page-context script (MAIN world) to trigger React handlers
+    // 2. Dispatch to page-context script (MAIN world)
     try {
-      window.dispatchEvent(new CustomEvent('__BYBIT_SELECT_PAYMENT__', {
-        detail: { preferred: ['Mobile Top-up', 'Bank Transfer'] }
-      }));
+      window.dispatchEvent(new CustomEvent('__BYBIT_SELECT_PAYMENT__'));
     } catch (e) {}
   }
 
@@ -151,7 +149,12 @@
   function autoSelectPaymentMethod(container) {
     if (!isUsdtRubBuyPage()) return;
 
-    // CRITICAL: Strict latch - NEVER process the same container twice to prevent infinite loops
+    // Notify page-context script (MAIN world) to attempt React-level selection
+    try {
+      window.dispatchEvent(new CustomEvent('__BYBIT_SELECT_PAYMENT__'));
+    } catch (e) {}
+
+    // Strict latch - NEVER process the same container twice to prevent infinite loops
     if (processedContainers.has(container) || container.dataset.bybitPaymentAttempted === 'true') {
       return;
     }
@@ -173,6 +176,15 @@
       return;
     }
 
+    // Check if dropdown option is ALREADY open / visible
+    const initialTarget = findTargetPaymentOption(container);
+    if (initialTarget) {
+      processedContainers.add(container);
+      container.dataset.bybitPaymentAttempted = 'true';
+      clickTargetOption(initialTarget);
+      return;
+    }
+
     // Lock immediately: selectorEl will NEVER be clicked again
     processedContainers.add(container);
     container.dataset.bybitPaymentAttempted = 'true';
@@ -181,18 +193,15 @@
     document.body.classList.add('bybit-suppress-dropdown');
 
     // Click the selector trigger once
-    simulateUserClick(selectorEl);
+    const cursorPointer = selectorEl.querySelector('.cursor-pointer') || selectorEl;
+    simulateUserClick(cursorPointer);
+    if (cursorPointer !== selectorEl) {
+      simulateUserClick(selectorEl);
+    }
 
-    // Also trigger in page context in case selectorEl has React props
-    try {
-      window.dispatchEvent(new CustomEvent('__BYBIT_SELECT_PAYMENT__', {
-        detail: { preferred: ['Mobile Top-up', 'Bank Transfer'] }
-      }));
-    } catch (e) {}
-
-    // Poll rapidly (every 20ms) for the dropdown items to appear
+    // Poll rapidly (every 15ms) for the dropdown items to appear
     let attempts = 0;
-    const maxAttempts = 25; // 500ms max
+    const maxAttempts = 30; // 450ms max
 
     const pollInterval = setInterval(() => {
       attempts++;
@@ -223,43 +232,43 @@
         clearInterval(pollInterval);
         document.body.classList.remove('bybit-suppress-dropdown');
       }
-    }, 20);
+    }, 15);
   }
 
   function findTargetPaymentOption(container) {
-    const all = Array.from(document.querySelectorAll('*'));
+    const scopeRoot = container.querySelector('[data-guide="payment-method"]') || container;
+    const all = Array.from(scopeRoot.querySelectorAll('*'));
     const candidates = [];
 
     for (let i = 0; i < all.length; i++) {
       const el = all[i];
 
-      // 1. MUST NOT be inside table rows of other orders
-      if (el.closest('table') && !container.contains(el)) continue;
-
-      // 2. MUST NOT be static trade list tags
-      if (el.closest('.payment-tags-container') || el.classList.contains('trade-list-tag')) continue;
-
-      // 3. MUST NOT be inside advertiser terms
-      if (el.closest('[class*="terms"], [class*="advertiser"]') || el.closest('.left-content')) continue;
-
-      // 4. MUST NOT be form inputs or action buttons
+      // Exclude form inputs or action buttons
       if (['INPUT', 'TEXTAREA', 'BUTTON'].includes(el.tagName)) continue;
 
-      const t = (el.innerText || el.textContent || '').trim();
+      // Exclude selector trigger itself
+      if (el.closest('.fiat-p2p__payment-select-comp')) continue;
 
-      // 5. Exclude selector trigger itself
+      // Exclude static trade list tags
+      if (el.closest('.payment-tags-container') || el.classList.contains('trade-list-tag')) continue;
+
+      // Exclude advertiser terms
+      if (el.closest('[class*="terms"], [class*="advertiser"]') || el.closest('.left-content')) continue;
+
+      const t = (el.innerText || el.textContent || '').trim();
+      if (!t) continue;
+
       if (t.includes('Select A Payment Method') || t.includes('Select a payment method')) continue;
 
-      // 6. Exclude menu container holding all options together
+      // Exclude menu container holding all options together
       if (t.includes('Cash Deposit') && t.includes('Mobile Top-up')) continue;
       if (t.includes('Cash Deposit') && t.includes('Bank Transfer')) continue;
+      if (t.includes('Bank Transfer') && t.includes('Mobile Top-up')) continue;
 
-      // 7. Length check: option item text is short
-      if (t.length > 35) continue;
+      // Length check: option item text is short
+      if (t.length > 40) continue;
 
-      // 8. Match target payment methods
-      if (t === 'Mobile Top-up' || t.startsWith('Mobile Top-up') ||
-          t === 'Bank Transfer' || t.startsWith('Bank Transfer')) {
+      if (t.includes('Mobile Top-up') || t.includes('Bank Transfer')) {
         candidates.push({ el, text: t });
       }
     }
@@ -278,6 +287,12 @@
   }
 
   function findPaymentMethodSelector(container) {
+    // 1. Direct class match for Bybit's unselected payment component
+    const directComp = container.querySelector('.fiat-p2p__payment-select-comp--unselected') ||
+                       container.querySelector('[data-guide="payment-method"] .fiat-p2p__payment-select-comp');
+    if (directComp) return directComp;
+
+    // 2. Candidate text search
     const candidates = Array.from(container.querySelectorAll('*')).filter(el => {
       if (el.closest('.payment-tags-container') || el.classList.contains('trade-list-tag')) {
         return false;
@@ -293,7 +308,7 @@
     if (candidates.length === 0) return null;
 
     const target = candidates[candidates.length - 1];
-    return target.closest('div[tabindex], div[class*="select"], button') || target;
+    return target.closest('.fiat-p2p__payment-select-comp, div[tabindex], div[class*="select"], button') || target;
   }
 
   // 5. Keyword Matching
@@ -581,7 +596,7 @@
       });
     }
 
-    console.log('[Bybit Highlighter] Extension active (v1.0.7)');
+    console.log('[Bybit Highlighter] Extension active (v1.0.8)');
   }
 
   init();

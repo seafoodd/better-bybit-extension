@@ -108,7 +108,9 @@ body.bybit-suppress-dropdown div[role="listbox"],
 body.bybit-suppress-dropdown div[class*="moly-select"],
 body.bybit-suppress-dropdown div[class*="bds-select"],
 body.bybit-suppress-dropdown ul[class*="select"],
-body.bybit-suppress-dropdown div[class*="menu"] {
+body.bybit-suppress-dropdown div[class*="menu"],
+body.bybit-suppress-dropdown .fiat-p2p__payment-select + div,
+body.bybit-suppress-dropdown [data-guide="payment-method"] > div:nth-child(2) {
   opacity: 0 !important;
   pointer-events: auto !important;
   transition: none !important;
