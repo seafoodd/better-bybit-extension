@@ -2,7 +2,7 @@
  * Bybit P2P Order Highlighter - Content Script
  * 1. Highlights keywords in terms text (green background, white text).
  * 2. Positions the badge right next to "Price xx.xx RUB xxs".
- * 3. Instant auto-selection of "Mobile Top-up" (or "Bank Transfer") strictly on USDT/RUB buy page.
+ * 3. Single-shot instant auto-selection of "Mobile Top-up" (or "Bank Transfer") strictly on USDT/RUB buy page.
  * 4. Solid continuous green left stripe.
  */
 (() => {
@@ -76,11 +76,9 @@
   // 2. Strict USDT/RUB Page Detection
   function isUsdtRubBuyPage() {
     const href = window.location.href.toLowerCase();
-    // 1. Check direct URL match
     if (href.includes('usdt') && href.includes('rub')) {
       return true;
     }
-    // 2. Check if the page is currently displaying RUB fiat and USDT crypto
     const body = document.body ? document.body.innerText : '';
     if (body.includes('RUB') && body.includes('USDT')) {
       return true;
@@ -88,135 +86,195 @@
     return false;
   }
 
-  // 3. React-Compatible Event Dispatcher
-  function triggerReactClick(element) {
-    if (!element) return;
+  // 3. User Simulation Click (React 18 & Moly/BDS compatible)
+  const processedContainers = new WeakSet();
 
-    // A. Invoke React's internal event handlers if available
-    const propKey = Object.keys(element).find(k => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
-    if (propKey && element[propKey]) {
-      const props = element[propKey];
-      const fakeEvent = {
-        stopPropagation() {},
-        preventDefault() {},
-        bubbles: true,
-        cancelable: true,
-        target: element,
-        currentTarget: element
-      };
-      if (typeof props.onClick === 'function') {
-        try { props.onClick(fakeEvent); } catch (e) {}
-      }
-      if (typeof props.onMouseDown === 'function') {
-        try { props.onMouseDown(fakeEvent); } catch (e) {}
-      }
-      if (typeof props.onPointerDown === 'function') {
-        try { props.onPointerDown(fakeEvent); } catch (e) {}
-      }
+  function simulateUserClick(target) {
+    if (!target) return;
+
+    const rect = target.getBoundingClientRect ? target.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+    const x = rect.left + (rect.width > 0 ? rect.width / 2 : 5);
+    const y = rect.top + (rect.height > 0 ? rect.height / 2 : 5);
+
+    const opts = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      clientX: x,
+      clientY: y,
+      screenX: x,
+      screenY: y,
+      button: 0,
+      buttons: 1
+    };
+
+    target.dispatchEvent(new MouseEvent('mouseenter', opts));
+    target.dispatchEvent(new MouseEvent('mouseover', opts));
+    target.dispatchEvent(new PointerEvent('pointerover', opts));
+    target.dispatchEvent(new PointerEvent('pointerenter', opts));
+    target.dispatchEvent(new PointerEvent('pointerdown', opts));
+    target.dispatchEvent(new MouseEvent('mousedown', opts));
+
+    try { target.focus(); } catch (e) {}
+
+    const upOpts = Object.assign({}, opts, { buttons: 0 });
+    target.dispatchEvent(new PointerEvent('pointerup', upOpts));
+    target.dispatchEvent(new MouseEvent('mouseup', upOpts));
+    target.dispatchEvent(new MouseEvent('click', upOpts));
+    try { target.click(); } catch (e) {}
+  }
+
+  function clickTargetOption(targetOption) {
+    if (!targetOption) return;
+
+    // 1. Click target and its option row container
+    const itemContainer = targetOption.closest('li, div[role="option"], div[class*="item"], div[class*="option"]') || targetOption;
+    simulateUserClick(itemContainer);
+    if (targetOption !== itemContainer) {
+      simulateUserClick(targetOption);
+    }
+    const inner = targetOption.querySelector('span, div, p');
+    if (inner && inner !== targetOption) {
+      simulateUserClick(inner);
     }
 
-    // B. Native pointer and mouse events
-    const eventTypes = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
-    eventTypes.forEach(type => {
-      const evt = new MouseEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        view: window
-      });
-      element.dispatchEvent(evt);
-    });
-
-    try { element.click(); } catch (e) {}
+    // 2. Dispatch to page-context script (MAIN world) to trigger React handlers
+    try {
+      window.dispatchEvent(new CustomEvent('__BYBIT_SELECT_PAYMENT__', {
+        detail: { preferred: ['Mobile Top-up', 'Bank Transfer'] }
+      }));
+    } catch (e) {}
   }
 
-  // 4. Instant Auto-Select Payment Method ("Mobile Top-up" -> "Bank Transfer")
-  function getDropdownPaymentOptions() {
-    // Find all elements containing "Mobile Top-up" or "Bank Transfer",
-    // excluding static tags in the closed table rows
-    const all = Array.from(document.querySelectorAll('*')).filter(el => {
-      // Exclude table row static tags
-      if (el.closest('.payment-tags-container') || el.classList.contains('trade-list-tag')) return false;
-      if (el.closest('td[style*="width: 196px"]')) return false;
-
-      const t = (el.innerText || el.textContent || '').trim();
-      // Exclude selector trigger itself
-      if (t.includes('Select A Payment Method') || t.includes('Select a payment method')) return false;
-      // Exclude container holding all options together
-      if (t.includes('Cash Deposit') && t.includes('Mobile Top-up')) return false;
-
-      return t === 'Mobile Top-up' || t === 'Bank Transfer' || 
-             t.endsWith('Mobile Top-up') || t.endsWith('Bank Transfer');
-    });
-
-    return all;
-  }
-
+  // 4. Single-Shot Auto-Select Payment Method ("Mobile Top-up" -> "Bank Transfer")
   function autoSelectPaymentMethod(container) {
     if (!isUsdtRubBuyPage()) return;
 
-    // Find the payment method selector trigger inside this open card
+    // CRITICAL: Strict latch - NEVER process the same container twice to prevent infinite loops
+    if (processedContainers.has(container) || container.dataset.bybitPaymentAttempted === 'true') {
+      return;
+    }
+
     const selectorEl = findPaymentMethodSelector(container);
     if (!selectorEl) return;
 
     const currentText = (selectorEl.innerText || selectorEl.textContent || '').trim();
-    // If a payment method is already selected, mark as done
+
+    // If a payment method is already selected, mark done and stop
     if (currentText.includes('Mobile Top-up') || currentText.includes('Bank Transfer')) {
-      container.__paymentAutoSelected = true;
+      processedContainers.add(container);
+      container.dataset.bybitPaymentAttempted = 'true';
       return;
     }
 
-    // Only proceed if it is in the unselected placeholder state
+    // Only proceed if it is in the unselected placeholder state ("Select A Payment Method")
     if (!currentText.toLowerCase().includes('select') && !currentText.toLowerCase().includes('выберите')) {
       return;
     }
 
-    if (container.__isSelectingPayment) return;
-    container.__isSelectingPayment = true;
+    // Lock immediately: selectorEl will NEVER be clicked again
+    processedContainers.add(container);
+    container.dataset.bybitPaymentAttempted = 'true';
 
-    // Suppress visible dropdown popover briefly
+    // Hide visual popup flicker
     document.body.classList.add('bybit-suppress-dropdown');
 
-    // Open dropdown
-    triggerReactClick(selectorEl);
+    // Click the selector trigger once
+    simulateUserClick(selectorEl);
 
-    // Fast polling (every 10ms for up to 300ms) to select the item as soon as it mounts
+    // Also trigger in page context in case selectorEl has React props
+    try {
+      window.dispatchEvent(new CustomEvent('__BYBIT_SELECT_PAYMENT__', {
+        detail: { preferred: ['Mobile Top-up', 'Bank Transfer'] }
+      }));
+    } catch (e) {}
+
+    // Poll rapidly (every 20ms) for the dropdown items to appear
     let attempts = 0;
-    const timer = setInterval(() => {
+    const maxAttempts = 25; // 500ms max
+
+    const pollInterval = setInterval(() => {
       attempts++;
-      const options = getDropdownPaymentOptions();
 
-      if (options.length > 0) {
-        // Priority 1: Mobile Top-up
-        let target = options.find(opt => (opt.innerText || opt.textContent || '').includes('Mobile Top-up'));
-        // Priority 2: Bank Transfer
-        if (!target) {
-          target = options.find(opt => (opt.innerText || opt.textContent || '').includes('Bank Transfer'));
-        }
-
-        if (target) {
-          clearInterval(timer);
-          container.__paymentAutoSelected = true;
-          container.__isSelectingPayment = false;
-
-          // Click the target option and its child/parent
-          triggerReactClick(target);
-          if (target.parentElement) triggerReactClick(target.parentElement);
-          const child = target.querySelector('span, div, p');
-          if (child) triggerReactClick(child);
-
-          setTimeout(() => {
-            document.body.classList.remove('bybit-suppress-dropdown');
-          }, 60);
-          return;
-        }
+      // Check if already selected
+      const curText = (selectorEl.innerText || selectorEl.textContent || '').trim();
+      if (curText.includes('Mobile Top-up') || curText.includes('Bank Transfer')) {
+        clearInterval(pollInterval);
+        document.body.classList.remove('bybit-suppress-dropdown');
+        return;
       }
 
-      if (attempts >= 30) {
-        clearInterval(timer);
-        container.__isSelectingPayment = false;
+      // Find the dropdown option
+      const targetOption = findTargetPaymentOption(container);
+
+      if (targetOption) {
+        clearInterval(pollInterval);
+        clickTargetOption(targetOption);
+
+        setTimeout(() => {
+          document.body.classList.remove('bybit-suppress-dropdown');
+        }, 60);
+        return;
+      }
+
+      // Stop after max attempts
+      if (attempts >= maxAttempts) {
+        clearInterval(pollInterval);
         document.body.classList.remove('bybit-suppress-dropdown');
       }
-    }, 10);
+    }, 20);
+  }
+
+  function findTargetPaymentOption(container) {
+    const all = Array.from(document.querySelectorAll('*'));
+    const candidates = [];
+
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i];
+
+      // 1. MUST NOT be inside table rows of other orders
+      if (el.closest('table') && !container.contains(el)) continue;
+
+      // 2. MUST NOT be static trade list tags
+      if (el.closest('.payment-tags-container') || el.classList.contains('trade-list-tag')) continue;
+
+      // 3. MUST NOT be inside advertiser terms
+      if (el.closest('[class*="terms"], [class*="advertiser"]') || el.closest('.left-content')) continue;
+
+      // 4. MUST NOT be form inputs or action buttons
+      if (['INPUT', 'TEXTAREA', 'BUTTON'].includes(el.tagName)) continue;
+
+      const t = (el.innerText || el.textContent || '').trim();
+
+      // 5. Exclude selector trigger itself
+      if (t.includes('Select A Payment Method') || t.includes('Select a payment method')) continue;
+
+      // 6. Exclude menu container holding all options together
+      if (t.includes('Cash Deposit') && t.includes('Mobile Top-up')) continue;
+      if (t.includes('Cash Deposit') && t.includes('Bank Transfer')) continue;
+
+      // 7. Length check: option item text is short
+      if (t.length > 35) continue;
+
+      // 8. Match target payment methods
+      if (t === 'Mobile Top-up' || t.startsWith('Mobile Top-up') ||
+          t === 'Bank Transfer' || t.startsWith('Bank Transfer')) {
+        candidates.push({ el, text: t });
+      }
+    }
+
+    if (candidates.length === 0) return null;
+
+    // Priority 1: Mobile Top-up
+    const mobile = candidates.find(c => c.text.includes('Mobile Top-up'));
+    if (mobile) return mobile.el;
+
+    // Priority 2: Bank Transfer
+    const bank = candidates.find(c => c.text.includes('Bank Transfer'));
+    if (bank) return bank.el;
+
+    return null;
   }
 
   function findPaymentMethodSelector(container) {
@@ -368,7 +426,6 @@
 
   // 8. Core Highlight & Auto-Select Execution
   function highlightOrders() {
-    // Ensure any old widget is removed
     const oldWidget = document.getElementById('bybit-p2p-floating-widget');
     if (oldWidget) oldWidget.remove();
 
@@ -381,7 +438,7 @@
     const openOrders = findOpenOrderContainers();
 
     openOrders.forEach(card => {
-      // 1. Instant Auto-Select Payment Method (USDT / RUB buy page only)
+      // 1. Single-Shot Auto-Select Payment Method (USDT / RUB only)
       autoSelectPaymentMethod(card);
 
       // 2. Check if terms contain keywords
@@ -524,7 +581,7 @@
       });
     }
 
-    console.log('[Bybit Highlighter] Extension active (v1.0.5)');
+    console.log('[Bybit Highlighter] Extension active (v1.0.7)');
   }
 
   init();

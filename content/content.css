@@ -103,8 +103,14 @@
 body.bybit-suppress-dropdown div[class*="dropdown"],
 body.bybit-suppress-dropdown div[class*="popover"],
 body.bybit-suppress-dropdown div[class*="select-list"],
-body.bybit-suppress-dropdown div[role="listbox"] {
+body.bybit-suppress-dropdown div[class*="select-dropdown"],
+body.bybit-suppress-dropdown div[role="listbox"],
+body.bybit-suppress-dropdown div[class*="moly-select"],
+body.bybit-suppress-dropdown div[class*="bds-select"],
+body.bybit-suppress-dropdown ul[class*="select"],
+body.bybit-suppress-dropdown div[class*="menu"] {
   opacity: 0 !important;
+  pointer-events: auto !important;
   transition: none !important;
   animation: none !important;
 }
