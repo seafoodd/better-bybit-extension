@@ -36,20 +36,35 @@
 #root,
 .otc__root,
 body,
-html {
+html,
+table,
+tbody,
+thead,
+.trade-table,
+[class*="table-wrapper"],
+[class*="dynamic"] {
   border-left: none !important;
 }
 
 #root.bybit-p2p-highlighted-order,
 #root.bybit-p2p-highlighted-card,
 .otc__root.bybit-p2p-highlighted-order,
-.otc__root.bybit-p2p-highlighted-card {
+.otc__root.bybit-p2p-highlighted-card,
+table.bybit-p2p-highlighted-order,
+table.bybit-p2p-highlighted-card,
+tbody.bybit-p2p-highlighted-order,
+tbody.bybit-p2p-highlighted-card,
+thead.bybit-p2p-highlighted-order,
+thead.bybit-p2p-highlighted-card,
+[class*="table-wrapper"].bybit-p2p-highlighted-order,
+[class*="table-wrapper"].bybit-p2p-highlighted-card,
+[class*="dynamic"].bybit-p2p-highlighted-order,
+[class*="dynamic"].bybit-p2p-highlighted-card {
   border-left: none !important;
   background-color: transparent !important;
 }
 
 .bybit-p2p-highlighted-order {
-  border-left: 4px solid var(--bybit-hl-border) !important;
   border-top-left-radius: 0 !important;
   border-bottom-left-radius: 0 !important;
   background-color: var(--bybit-hl-bg) !important;
@@ -57,12 +72,23 @@ html {
   transition: border-color 0.2s ease, background-color 0.2s ease !important;
 }
 
-tr.bybit-p2p-highlighted-order > td:first-child {
-  border-left: 4px solid var(--bybit-hl-border) !important;
+tr.bybit-p2p-highlighted-order {
+  border-left: none !important;
 }
 
 tr.bybit-p2p-highlighted-order > td {
   background-color: var(--bybit-hl-bg) !important;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+}
+
+tr.bybit-p2p-highlighted-order > td:first-child {
+  border-left: 4px solid var(--bybit-hl-border) !important;
+  padding-left: 12px !important;
+}
+
+tr.bybit-p2p-highlighted-order > td:last-child {
+  padding-right: 12px !important;
 }
 
 .bybit-p2p-highlighted-card {
@@ -70,6 +96,13 @@ tr.bybit-p2p-highlighted-order > td {
   border-top-left-radius: 0 !important;
   border-bottom-left-radius: 0 !important;
   position: relative !important;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+}
+
+.new-user-ads-carousel-card.bybit-p2p-highlighted-order {
+  padding-left: 8px !important;
+  padding-right: 8px !important;
 }
 
 .bybit-p2p-highlighted-order > div {

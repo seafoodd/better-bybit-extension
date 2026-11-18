@@ -755,18 +755,17 @@ export default defineContentScript({
           return;
         }
 
-        // 2. Otherwise find the nearest card/accordion container
-        let cur: HTMLElement | null = header.parentElement;
-        while (cur && cur.id !== 'root' && cur !== document.body && cur.parentElement !== document.body) {
-          if (cur.classList.contains('otc__root')) break;
-          const text = cur.textContent || '';
-          if (text.includes('I will pay') || text.includes('Я заплачу') || text.includes('Price') || text.includes('Цена')) {
-            if (!result.includes(cur)) {
-              result.push(cur);
-            }
-            break;
-          }
-          cur = cur.parentElement;
+        // 2. If inside a carousel card
+        const card = header.closest<HTMLElement>('.new-user-ads-carousel-card');
+        if (card && !result.includes(card)) {
+          result.push(card);
+          return;
+        }
+
+        // 3. Otherwise find the nearest local detail container (stop before table/tbody/main)
+        const detail = header.closest<HTMLElement>('[class*="detail"], [class*="collapse"], [class*="terms"]');
+        if (detail && !result.includes(detail)) {
+          result.push(detail);
         }
       });
 
@@ -894,12 +893,12 @@ export default defineContentScript({
 
       const keywords = getActiveKeywords();
 
-      // Clean up any rogue classes from root
+      // Clean up any rogue classes from root and parent containers
       const rootEl = document.getElementById('root');
       if (rootEl) {
         rootEl.classList.remove('bybit-p2p-highlighted-card', 'bybit-p2p-highlighted-order');
       }
-      document.querySelectorAll('.otc__root').forEach(el => {
+      document.querySelectorAll('.otc__root, table, tbody, thead, .trade-table, [class*="table-wrapper"], [class*="dynamic"]').forEach(el => {
         el.classList.remove('bybit-p2p-highlighted-card', 'bybit-p2p-highlighted-order');
       });
 
@@ -929,7 +928,6 @@ export default defineContentScript({
 
         if (isMatch) {
           card.classList.add('bybit-p2p-highlighted-card');
-          card.classList.add('bybit-p2p-highlighted-order');
           renderBadgeNextToPrice(card, matched);
         } else {
           card.classList.remove('bybit-p2p-highlighted-card');
