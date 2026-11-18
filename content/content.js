@@ -1,6 +1,6 @@
 /**
  * Bybit P2P Order Highlighter - Content Script
- * Intercepts Bybit P2P API responses and highlights orders matching keywords (СБП, телефона).
+ * Receives intercepted Bybit P2P responses and highlights orders matching keywords (СБП, телефона).
  */
 (() => {
   'use strict';
@@ -89,83 +89,24 @@
     document.documentElement.setAttribute('data-bybit-theme', color || 'emerald');
   }
 
-  // 2. Setup Network Interception
-  function setupFirefoxInterception() {
-    const pageWin = window.wrappedJSObject;
-    if (!pageWin || typeof exportFunction !== 'function') {
-      return false;
-    }
-
-    const TARGET_PATTERNS = ['/fiat/otc/', '/otc/item/', 'online'];
-    function isTargetUrl(url) {
-      if (!url || typeof url !== 'string') return false;
-      return TARGET_PATTERNS.some(p => url.includes(p));
-    }
-
-    // Hook fetch
-    if (pageWin.fetch) {
-      const origFetch = pageWin.fetch;
-      function hookedFetch(resource, init) {
-        const promise = origFetch.apply(pageWin, arguments);
-        try {
-          const url = typeof resource === 'string' ? resource : (resource && resource.url ? resource.url : '');
-          if (isTargetUrl(url)) {
-            promise.then(response => {
-              try {
-                const clone = response.clone();
-                clone.text().then(text => processApiPayload(text, url)).catch(() => {});
-              } catch (e) {}
-            }).catch(() => {});
-          }
-        } catch (e) {}
-        return promise;
-      }
-      pageWin.fetch = exportFunction(hookedFetch, pageWin, { defineAs: 'fetch' });
-    }
-
-    // Hook XMLHttpRequest
-    if (pageWin.XMLHttpRequest && pageWin.XMLHttpRequest.prototype) {
-      const proto = pageWin.XMLHttpRequest.prototype;
-      const origOpen = proto.open;
-      const origSend = proto.send;
-
-      function hookedOpen(method, url) {
-        this.__bybit_url = url;
-        return origOpen.apply(this, arguments);
-      }
-
-      function hookedSend(body) {
-        const xhr = this;
-        xhr.addEventListener('load', function () {
-          try {
-            const url = xhr.__bybit_url || '';
-            if (isTargetUrl(url)) {
-              processApiPayload(xhr.responseText, url);
-            }
-          } catch (e) {}
-        });
-        return origSend.apply(this, arguments);
-      }
-
-      proto.open = exportFunction(hookedOpen, pageWin);
-      proto.send = exportFunction(hookedSend, pageWin);
-    }
-
-    console.log('[Bybit Highlighter] Firefox native interception hooked');
-    return true;
-  }
-
-  function setupInjectedScriptFallback() {
+  // 2. Inject Page-Context Interceptor
+  // Runs in the page's main world to avoid any Firefox Xray Vision cross-compartment permission errors
+  function injectPageInterceptor() {
     try {
       const script = document.createElement('script');
       script.src = api.runtime.getURL('content/injected.js');
+      script.async = false;
       script.onload = () => script.remove();
       (document.head || document.documentElement).appendChild(script);
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[Bybit Highlighter] Script injection failed:', e);
+    }
 
-    window.addEventListener('__BYBIT_P2P_DATA__', (e) => {
-      if (e.detail && e.detail.text) {
-        processApiPayload(e.detail.text, e.detail.url);
+    // Listen for data dispatched by injected.js
+    window.addEventListener('message', (event) => {
+      if (event.source !== window) return;
+      if (event.data && event.data.type === '__BYBIT_P2P_DATA__' && event.data.text) {
+        processApiPayload(event.data.text, event.data.url);
       }
     });
   }
@@ -421,7 +362,6 @@
 
       // Attach to row
       if (row.tagName === 'TR') {
-        // For tables, place inside a cell or spanning container
         const targetCell = row.children[3] || row.children[row.children.length - 1] || row.children[0];
         targetCell.appendChild(box);
       } else {
@@ -566,7 +506,6 @@
       let shouldUpdate = false;
       for (const m of mutations) {
         if (m.addedNodes.length > 0 || m.removedNodes.length > 0) {
-          // Check if the change is not inside our own widgets
           const target = m.target;
           if (target && target.closest && (target.closest('#bybit-p2p-floating-widget') || target.closest('.bybit-p2p-remark-box'))) {
             continue;
@@ -597,14 +536,7 @@
   // Initialization
   function init() {
     loadSettings();
-
-    // Hook network interception (Firefox native + script fallback)
-    const hooked = setupFirefoxInterception();
-    if (!hooked) {
-      setupInjectedScriptFallback();
-    } else {
-      setupInjectedScriptFallback(); // Dual insurance
-    }
+    injectPageInterceptor();
 
     if (document.body) {
       setupObserver();
