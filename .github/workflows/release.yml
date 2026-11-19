@@ -29,7 +29,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -42,17 +42,19 @@ jobs:
         run: |
           pnpm run zip
           pnpm run zip:firefox
+          mkdir -p releases
+          cp .output/*.zip releases/
 
       - name: Upload extension artifacts
         uses: actions/upload-artifact@v4
         with:
           name: better-bybit-build
-          path: .output/*.zip
+          path: releases/*.zip
           if-no-files-found: error
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: .output/*.zip
+          files: releases/*.zip
           generate_release_notes: true

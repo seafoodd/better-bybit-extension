@@ -5,6 +5,7 @@ node_modules/
 .output/
 .wxt/
 dist/
+releases/
 *.zip
 
 # Logs
