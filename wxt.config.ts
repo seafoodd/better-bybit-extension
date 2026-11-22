@@ -18,7 +18,7 @@ export default defineConfig({
 	data_collection_permissions: {
           required: ['none'],
         },
-      }
+      } as any,
     },
     icons: {
       '16': 'icons/icon-16.png',
